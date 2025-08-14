@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
-
 PROG_NAME="comicpress"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/$PROG_NAME"
 
@@ -21,15 +19,31 @@ main() {
         exit 1
     fi
 
+    if ! ls "$1"/*.pdf > /dev/null 2>&1; then
+        echo "$PROG_NAME: '$1' is not a directory containing PDF files." >&2
+        exit 1
+    fi
+
     output_dir="$2"
     mkdir -p "$output_dir" "$CACHE_DIR"
-    echo "Processing PDFs in parallel..."
 
-    export CACHE_DIR PIXEL_DENSITY MAGICK_MEMORY_LIMIT DISPLAY_WIDTH \
-        DISPLAY_HEIGHT SCALING_FILTER IMAGE_QUALITY output_dir
-    export -f process_pdf
-    find "$1" -maxdepth 1 -type f -name "*.pdf" \
-        | parallel -j "$NUM_THREADS" process_pdf
+    if command -v parallel > /dev/null; then
+        export CACHE_DIR PIXEL_DENSITY MAGICK_MEMORY_LIMIT DISPLAY_WIDTH \
+            DISPLAY_HEIGHT SCALING_FILTER IMAGE_QUALITY output_dir
+        export -f process_pdf
+        echo "Processing PDFs in parallel..."
+        ls "$1"/*.pdf | parallel -j "$NUM_THREADS" process_pdf
+    else
+        printf "$PROG_NAME: %s %s %s\n" \
+            'Warning: `parallel` command not found. The script will run' \
+            "sequentially, which is slower. It’s recommended to stop the" \
+            "script and install GNU Parallel." \
+            >&2
+        MAGICK_UNLIMITED_MEMORY=true
+        for pdf in "$1"/*.pdf; do
+            process_pdf "$pdf"
+        done
+    fi
 
     rm -rf "$CACHE_DIR/"
     echo "All tasks complete."
@@ -66,20 +80,28 @@ process_pdf() {
             colors=8
         fi
 
-        magick \
-            -limit memory "$MAGICK_MEMORY_LIMIT" \
-            -density "$PIXEL_DENSITY" \
-            "$pdf_file_name[$page_num_0_indexed]" \
-            -trim +repage \
-            -colorspace Gray \
-            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT" \
-            -filter "$SCALING_FILTER" \
-            -quality "$IMAGE_QUALITY" \
-            -define webp:method=6 \
-            -strip \
-            -colors "$colors" \
-            -level 0%,100%,0.5 \
+        magick_cmd=(magick)
+
+        if test -z "$MAGICK_UNLIMITED_MEMORY"; then
+            magick_cmd+=(-limit memory "$MAGICK_MEMORY_LIMIT")
+        fi
+
+        magick_cmd+=(
+            -density "$PIXEL_DENSITY"
+            "$pdf_file_name[$page_num_0_indexed]"
+            -trim +repage
+            -colorspace Gray
+            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT"
+            -filter "$SCALING_FILTER"
+            -quality "$IMAGE_QUALITY"
+            -define webp:method=6
+            -strip
+            -colors "$colors"
+            -level 0%,100%,0.5
             "$output_file"
+        )
+
+        "${magick_cmd[@]}"
     done
 
     echo "Creating archive '$output_dir/$pdf_base_name.cbz'..."
