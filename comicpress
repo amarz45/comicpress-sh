@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -e
 
@@ -16,14 +16,17 @@ SCALING_FILTER=MagicKernelSharp2021
 IMAGE_QUALITY=100
 
 main() {
-    if test -z "$1"; then
-        echo "$PROG_NAME: Missing path to directory with PDF files." >&2
+    if test "$#" -ne 2; then
+        echo "$PROG_NAME: Usage: $PROG_NAME INPUT_DIRECTORY OUTPUT_DIRECTORY" >&2
         exit 1
     fi
 
-    mkdir -p CBZ "$CACHE_DIR"
+    output_dir="$2"
+    mkdir -p "$output_dir" "$CACHE_DIR"
     echo "Processing PDFs in parallel..."
 
+    export CACHE_DIR PIXEL_DENSITY MAGICK_MEMORY_LIMIT DISPLAY_WIDTH \
+        DISPLAY_HEIGHT SCALING_FILTER IMAGE_QUALITY output_dir
     export -f process_pdf
     find "$1" -maxdepth 1 -type f -name "*.pdf" \
         | parallel --eta -j "$NUM_THREADS" process_pdf
@@ -79,9 +82,9 @@ process_pdf() {
             "$output_file"
     done
 
-    echo "Creating archive 'CBZ/$pdf_base_name.cbz'..."
-    zip -0 -j "CBZ/${pdf_base_name}.cbz" "$temp_dir"/*.webp
-    printf "%s\n\n" "Archive 'CBZ/$pdf_base_name.cbz' created."
+    echo "Creating archive '$output_dir/$pdf_base_name.cbz'..."
+    zip -0 -j "$output_dir/${pdf_base_name}.cbz" "$temp_dir"/*.webp
+    printf "%s\n\n" "Archive '$output_dir/$pdf_base_name.cbz' created."
 }
 
 main "$@"
