@@ -84,4 +84,4 @@ process_pdf() {
     printf "%s\n\n" "Archive 'CBZ/$pdf_base_name.cbz' created."
 }
 
-main
+main "$@"
