@@ -1,0 +1,87 @@
+#!/bin/sh
+
+set -e
+
+PROG_NAME="$0"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/comicpress"
+
+NUM_THREADS=4
+MAGICK_MEMORY_LIMIT=1GiB
+
+PIXEL_DENSITY=300
+DISPLAY_WIDTH=1440
+DISPLAY_HEIGHT=1920
+
+SCALING_FILTER=MagicKernelSharp2021
+IMAGE_QUALITY=100
+
+main() {
+    if test -z "$1"; then
+        echo "$PROG_NAME: Missing path to directory with PDF files." >&2
+        exit 1
+    fi
+
+    mkdir -p CBZ "$CACHE_DIR"
+    echo "Processing PDFs in parallel..."
+
+    export -f process_pdf
+    find "$1" -maxdepth 1 -type f -name "*.pdf" \
+        | parallel --eta -j "$NUM_THREADS" process_pdf
+
+    rm -rf "$CACHE_DIR/"
+    echo "All tasks complete."
+}
+
+process_pdf() {
+    pdf_file_name="$1"
+    pdf_base_name="$(basename "$pdf_file_name" .pdf)"
+
+    echo "Processing '$pdf_file_name'..."
+
+    temp_dir="$CACHE_DIR/$pdf_base_name"
+    mkdir -p "$temp_dir"
+
+    pages_non_monochrome=$(
+        pdfimages -list "$pdf_file_name" | \
+        tail -n +3 | \
+        awk '$3 != "stencil" {print $1}' | \
+        sort -un
+    )
+
+    num_pages="$(pdfinfo "$pdf_file_name" | grep "^Pages:" | awk '{print $2}')"
+    num_pages_digits="$(echo -n "$num_pages" | wc -c | tr -d "[:space:]")"
+
+    echo "Converting $num_pages pages..."
+    for page_num in $(seq 1 "$num_pages"); do
+        page_num_0_indexed="$(expr "$page_num" - 1)"
+        page_num_0_padded="$(printf "%0*d" "$num_pages_digits" "$page_num")"
+        output_file="$temp_dir/$page_num_0_padded.webp"
+
+        if echo "$pages_non_monochrome" | grep -q "^$page_num$"; then
+            colors=128
+        else
+            colors=8
+        fi
+
+        magick \
+            -limit memory "$MAGICK_MEMORY_LIMIT" \
+            -density "$PIXEL_DENSITY" \
+            "$pdf_file_name[$page_num_0_indexed]" \
+            -trim +repage \
+            -colorspace Gray \
+            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT" \
+            -filter "$SCALING_FILTER" \
+            -quality "$IMAGE_QUALITY" \
+            -define webp:method=6 \
+            -strip \
+            -colors "$colors" \
+            -level 0%,100%,0.5 \
+            "$output_file"
+    done
+
+    echo "Creating archive 'CBZ/$pdf_base_name.cbz'..."
+    zip -0 -j "CBZ/${pdf_base_name}.cbz" "$temp_dir"/*.webp
+    printf "%s\n\n" "Archive 'CBZ/$pdf_base_name.cbz' created."
+}
+
+main
