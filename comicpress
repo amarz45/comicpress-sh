@@ -2,8 +2,8 @@
 
 set -e
 
-PROG_NAME="$0"
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/comicpress"
+PROG_NAME="comicpress"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/$PROG_NAME"
 
 NUM_THREADS=4
 MAGICK_MEMORY_LIMIT=1GiB
