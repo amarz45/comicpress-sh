@@ -6,33 +6,24 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/$PROG_NAME"
 NUM_THREADS=4
 MAGICK_MEMORY_LIMIT=1GiB
 
-PIXEL_DENSITY=300
-DISPLAY_WIDTH=1440
-DISPLAY_HEIGHT=1920
-
-SCALING_FILTER=MagicKernelSharp2021
 IMAGE_QUALITY=100
 
 main() {
-    if test "$#" -ne 2; then
-        echo "$PROG_NAME: Usage: $PROG_NAME INPUT_DIRECTORY OUTPUT_DIRECTORY" >&2
+    parse_params "$@"
+
+    if ! ls "$INPUT_DIRECTORY"/*.pdf > /dev/null 2>&1; then
+        echo "$PROG_NAME: '$INPUT_DIRECTORY' is not a directory containing PDF files." >&2
         exit 1
     fi
 
-    if ! ls "$1"/*.pdf > /dev/null 2>&1; then
-        echo "$PROG_NAME: '$1' is not a directory containing PDF files." >&2
-        exit 1
-    fi
-
-    output_dir="$2"
-    mkdir -p "$output_dir" "$CACHE_DIR"
+    mkdir -p "$OUTPUT_DIRECTORY" "$CACHE_DIR"
 
     if command -v parallel > /dev/null; then
         export CACHE_DIR PIXEL_DENSITY MAGICK_MEMORY_LIMIT DISPLAY_WIDTH \
-            DISPLAY_HEIGHT SCALING_FILTER IMAGE_QUALITY output_dir
+            DISPLAY_HEIGHT SCALING_FILTER IMAGE_QUALITY OUTPUT_DIRECTORY
         export -f process_pdf
         echo "Processing PDFs in parallel..."
-        ls "$1"/*.pdf | parallel -j "$NUM_THREADS" process_pdf
+        ls "$INPUT_DIRECTORY"/*.pdf | parallel -j "$NUM_THREADS" process_pdf
     else
         printf "$PROG_NAME: %s %s %s\n" \
             'Warning: `parallel` command not found. The script will run' \
@@ -47,6 +38,134 @@ main() {
 
     rm -rf "$CACHE_DIR/"
     echo "All tasks complete."
+}
+
+parse_params() {
+    set_param() {
+        local param_name="$1"
+        local var_name="$2"
+        local value="$3"
+        if [[ -z "$value" ]]; then
+            echo "$PROG_NAME: Parameter '$param_name' needs an argument." >&2
+            exit 1
+        fi
+        eval "$var_name='$value'"
+    }
+
+    check_device() {
+        if [[ "$DEVICE" = "Kobo Sage" ]] then
+            PIXEL_DENSITY=300
+            DISPLAY_WIDTH=1440
+            DISPLAY_HEIGHT=1920
+        else
+            printf "$PROG_NAME: %s %s\n" \
+                "'$DEVICE' is not a recognized device. See \`-list_devices\`" \
+                "for a list of recognized devices." \
+                >&2
+            exit 1;
+        fi
+    }
+
+    check_filter() {
+        if ! magick -list filter | grep -q "^$SCALING_FILTER$"; then
+            printf "$PROG_NAME: %s %s %s\n" \
+                "'$SCALING_FILTER' is not a valid scaling filter. Try" \
+                '`magick -list filter` to see a full list of possible' \
+                "filters." \
+                >&2
+            exit 1
+        fi
+    }
+
+    SCALING_FILTER=MagicKernelSharp2021
+
+    while [[ "$#" -gt 0 ]]; do
+        if [[ "${1:0:1}" != - ]]; then
+            if [[ -z "$2" || "${2:0:1}" = "-" ]]; then
+                printf "$PROG_NAME: %s %s\n" \
+                    "Input directory parameter must have an output directory" \
+                    "parameter after it." \
+                    >&2
+                exit 1
+            fi
+            INPUT_DIRECTORY="$1"
+            OUTPUT_DIRECTORY="$2"
+            shift 2;
+            continue;
+        fi
+
+        case "$1" in
+            -help | -h)
+                help
+                exit
+                ;;
+            -device)
+                set_param "$1" DEVICE "$2"
+                check_device
+                shift
+                ;;
+            -density | -d)
+                set_param "$1" PIXEL_DENSITY "$2"
+                shift
+                ;;
+            -width | -w)
+                set_param "$1" DISPLAY_WIDTH "$2"
+                shift
+                ;;
+            -height | -h)
+                set_param "$1" DISPLAY_HEIGHT "$2"
+                shift
+                ;;
+            -filter | -f)
+                set_param "$1" SCALING_FILTER "$2"
+                check_filter
+                shift
+                ;;
+            *)
+                echo "$PROG_NAME: '$1' is not a valid parameter." >&2
+                exit 1
+                ;;
+        esac
+
+        shift
+    done
+
+    if [[
+        -z "$PIXEL_DENSITY" \
+        || -z "$DISPLAY_WIDTH" \
+        || -z "$DISPLAY_HEIGHT" \
+        || -z "$INPUT_DIRECTORY" \
+    ]]
+    then
+        help
+        exit 1
+    fi
+}
+
+help() {
+    echo 'comicpress: command-line tool to convert and compress comics and manga
+
+Usage:
+    Option 1: comicpress -device DEVICE_NAME INPUT_DIRECTORY OUTPUT_DIRECTORY
+    Option 2: comicpress -density PIXEL_DENSITY -width DISPLAY_WIDTH -height DISPLAY_HEIGHT INPUT_DIRECTORY OUTPUT_DIRECTORY
+
+Parameters:
+    -device            Ereader device to target. This automatically sets the correct values for `-density`, `-width`, and `-height`. For a full list, see `-list_devices`.
+    -density, -d       Pixel density of the display to target in pixels per inch
+    -width, -w         Width of the display to target in pixels
+    -height, -h        Height of the display to target in pixels
+    -filter, -f        ImageMagick scaling filter to use (default: MagickKernelSharp2021). Run `magick -list filter` for a full list of possible choices.
+    -list_devices, -l  List of all devices and their respective values for pixel density, width, and height.
+    -help, -h          Print this help message and exit.
+
+Examples:
+    1. comicpress -device "Kobo Sage" PDF CBZ
+    2. comicpress -density 300 -width 1440 -height 1920 PDF CBZ
+'
+}
+
+list_devices() {
+    echo "Kobo Sage (density: 300, width: 1440, height: 1920)"
 }
 
 process_pdf() {
@@ -82,7 +201,7 @@ process_pdf() {
 
         magick_cmd=(magick)
 
-        if test -z "$MAGICK_UNLIMITED_MEMORY"; then
+        if [[ -z "$MAGICK_UNLIMITED_MEMORY" ]]; then
             magick_cmd+=(-limit memory "$MAGICK_MEMORY_LIMIT")
         fi
 
@@ -104,9 +223,9 @@ process_pdf() {
         "${magick_cmd[@]}"
     done
 
-    echo "Creating archive '$output_dir/$pdf_base_name.cbz'..."
-    zip -0 -j "$output_dir/${pdf_base_name}.cbz" "$temp_dir"/*.webp
-    printf "%s\n\n" "Archive '$output_dir/$pdf_base_name.cbz' created."
+    echo "Creating archive '$OUTPUT_DIRECTORY/$pdf_base_name.cbz'..."
+    zip -0 -j "$OUTPUT_DIRECTORY/${pdf_base_name}.cbz" "$temp_dir"/*.webp
+    printf "%s\n\n" "Archive '$OUTPUT_DIRECTORY/$pdf_base_name.cbz' created."
 }
 
 main "$@"
