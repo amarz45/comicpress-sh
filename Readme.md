@@ -28,8 +28,6 @@ Digital comic book files, especially PDFs, are often unnecessarily large and not
 
 ## Installation
 
-The included `Makefile` allows for easy installation.
-
 1. Clone the repository:
 
    ```sh
