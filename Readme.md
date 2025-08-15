@@ -8,10 +8,10 @@ Digital comic book files, especially PDFs, are often unnecessarily large and not
 
 ## Features
 
-- **Device profiles**: Easily target specific ereader devices to automatically use the correct resolution and density.
-- **Intelligent page analysis**: Automatically detects which pages are monochrome (stencil-only) and which contain colour or grayscale images.
-- **Adaptive optimization**: Applies aggressive (8-colour) compression to monochrome pages and quality-preserving (128-colour) compression to non-monochrome pages. This saves _a lot_ of space, and the quality loss is _indistinguishable_ (unless you zoom in very closely).
-- **Parallel processing**: Maximizes speed by converting multiple PDF files in parallel using all available CPU cores. If GNU Parallel is not installed, the script automatically reverts to a slower, sequential mode.
+- Device profiles: Easily target specific ereader devices to automatically use the correct resolution and density.
+- Intelligent page analysis: Automatically detects which pages are monochrome (stencil-only) and which contain colour or grayscale images.
+- Adaptive optimization: Applies aggressive (8-colour) compression to monochrome pages and quality-preserving (128-colour) compression to non-monochrome pages. This saves _a lot_ of space, and the quality loss is _indistinguishable_ (unless you zoom in very closely).
+- Parallel processing: Maximizes speed by converting multiple PDF files in parallel using all available CPU cores. If GNU Parallel is not installed, the script automatically reverts to a slower, sequential mode.
 
 # Dependencies
 
