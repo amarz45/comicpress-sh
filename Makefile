@@ -3,7 +3,7 @@ PREFIX=/usr/local
 BINDIR=${PREFIX}/bin
 LICENSEDIR=${PREFIX}/share/licenses/${PROG}
 
-install:
+all:
 	chmod 755 ${PROG}
 	cp ${PROG} ${PROG}.bak
 	mkdir -p ${DESTDIR}${BINDIR}
