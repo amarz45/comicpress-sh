@@ -48,7 +48,7 @@ The included `Makefile` allows for easy installation.
 To install to a different directory, set the `PREFIX` variable:
 
 ```sh
-sudo make PREFIX=$HOME/.local
+make PREFIX=$HOME/.local
 ```
 
 ## Uninstallation
