@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 PROG_NAME="comicpress"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/$PROG_NAME"
 
@@ -220,7 +222,7 @@ process_pdf() {
             "$output_file"
         )
 
-        "${magick_cmd[@]}"
+        "${magick_cmd[@]}" || true
     done
 
     echo "Creating archive '$OUTPUT_DIRECTORY/$pdf_base_name.cbz'..."
