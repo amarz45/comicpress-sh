@@ -212,8 +212,8 @@ process_pdf() {
             "$pdf_file_name[$page_num_0_indexed]"
             -trim +repage
             -colorspace Gray
-            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT"
             -filter "$SCALING_FILTER"
+            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT"
             -quality "$IMAGE_QUALITY"
             -define webp:method=6
             -strip
