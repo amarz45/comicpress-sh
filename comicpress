@@ -3,7 +3,11 @@
 set -euo pipefail
 
 PROG_NAME="comicpress"
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/$PROG_NAME"
+CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+CACHE_DIR="$CACHE_HOME/$PROG_NAME"
+
+TMPDIR="$CACHE_HOME/parallel"
+MAGICK_TEMPORARY_PATH="$CACHE_HOME/magick"
 
 NUM_THREADS=4
 MAGICK_MEMORY_LIMIT=2GiB
@@ -18,11 +22,13 @@ main() {
         exit 1
     fi
 
-    mkdir -p "$OUTPUT_DIRECTORY" "$CACHE_DIR"
+    mkdir -p "$OUTPUT_DIRECTORY" "$CACHE_DIR" "$MAGICK_TEMPORARY_PATH"
 
     if command -v parallel > /dev/null; then
+        mkdir -p "$TMPDIR"
         export CACHE_DIR PIXEL_DENSITY MAGICK_MEMORY_LIMIT DISPLAY_WIDTH \
-            DISPLAY_HEIGHT SCALING_FILTER IMAGE_QUALITY OUTPUT_DIRECTORY
+            DISPLAY_HEIGHT SCALING_FILTER IMAGE_QUALITY OUTPUT_DIRECTORY \
+            TMPDIR MAGICK_TEMPORARY_PATH
         export -f process_pdf list_to_ranges
         echo "Processing PDFs in parallel..."
         ls "$INPUT_DIRECTORY"/*.pdf | parallel -j "$NUM_THREADS" process_pdf
