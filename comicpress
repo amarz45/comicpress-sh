@@ -4,13 +4,10 @@ set -euo pipefail
 
 PROG_NAME="comicpress"
 CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
-CACHE_DIR="$CACHE_HOME/$PROG_NAME"
+CACHE_DIR=$(mktemp -d "$CACHE_HOME/$PROG_NAME/XXXXXX")
 
 TMPDIR="$CACHE_HOME/parallel"
 MAGICK_TEMPORARY_PATH="$CACHE_HOME/magick"
-
-NUM_THREADS=4
-MAGICK_MEMORY_LIMIT=2GiB
 
 IMAGE_QUALITY=100
 
@@ -38,7 +35,6 @@ main() {
             "sequentially, which is slower. It’s recommended to stop the" \
             "script and install GNU Parallel." \
             >&2
-        MAGICK_UNLIMITED_MEMORY=true
         for pdf in "$1"/*.pdf; do
             process_pdf "$pdf"
         done
@@ -86,6 +82,8 @@ parse_params() {
     }
 
     SCALING_FILTER=MagicKernelSharp2021
+    MAGICK_MEMORY_LIMIT=2GiB
+    NUM_THREADS=4
 
     while [[ "$#" -gt 0 ]]; do
         if [[ "${1:0:1}" != - ]]; then
@@ -127,6 +125,14 @@ parse_params() {
             -filter | -f)
                 set_param "$1" SCALING_FILTER "$2"
                 check_filter
+                shift
+                ;;
+            -jobs | -j)
+                set_param "$1" NUM_THREADS "$2"
+                shift
+                ;;
+            -magick_memory_limit)
+                set_param "$1" MAGICK_MEMORY_LIMIT "$2"
                 shift
                 ;;
             *)
@@ -236,7 +242,7 @@ process_pdf() {
         index_range_str=$(list_to_ranges "${indices[*]}")
 
         local magick_cmd=(magick)
-        [[ -z "${MAGICK_UNLIMITED_MEMORY:-}" ]] && magick_cmd+=(-limit memory "$MAGICK_MEMORY_LIMIT")
+        [[ "$MAGICK_MEMORY_LIMIT" != "off" ]] && magick_cmd+=(-limit memory "$MAGICK_MEMORY_LIMIT")
 
         magick_cmd+=(
             -density "$PIXEL_DENSITY"
