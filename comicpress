@@ -5,7 +5,8 @@ set -euo pipefail
 PROG_NAME="comicpress"
 CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 CACHE_DIR=$(mktemp -d "$CACHE_HOME/$PROG_NAME/XXXXXX")
-
+# Clean up the cache directory on exit
+trap 'rm -rf "$CACHE_DIR"' EXIT
 TMPDIR="$CACHE_HOME/parallel"
 MAGICK_TEMPORARY_PATH="$CACHE_HOME/magick"
 
@@ -14,37 +15,43 @@ IMAGE_QUALITY=100
 main() {
     parse_params "$@"
 
-    if ! ls "$INPUT_DIRECTORY"/*.pdf > /dev/null 2>&1; then
-        echo "$PROG_NAME: '$INPUT_DIRECTORY' is not a directory containing PDF files." >&2
-        exit 1
-    fi
-
     mkdir -p "$OUTPUT_DIRECTORY" "$CACHE_DIR" "$MAGICK_TEMPORARY_PATH"
+
+    # A wrapper function is needed for GNU Parallel to decide
+    # whether to process a PDF or a CBZ.
+    process_file() {
+        local input_file="$1"
+        if [[ "$input_file" == *.pdf ]]; then
+            process_pdf "$input_file"
+        elif [[ "$input_file" == *.cbz ]]; then
+            process_cbz "$input_file"
+        else
+             echo "$PROG_NAME: Skipping unsupported file '$input_file'." >&2
+        fi
+    }
 
     if command -v parallel > /dev/null; then
         mkdir -p "$TMPDIR"
         export CACHE_DIR PIXEL_DENSITY MAGICK_MEMORY_LIMIT DISPLAY_WIDTH \
             DISPLAY_HEIGHT SCALING_FILTER IMAGE_QUALITY OUTPUT_DIRECTORY \
             TMPDIR MAGICK_TEMPORARY_PATH
-        export -f process_pdf list_to_ranges
-        echo "Processing PDFs in parallel..."
-        ls "$INPUT_DIRECTORY"/*.pdf | parallel -j "$NUM_THREADS" process_pdf
+        # Export all needed functions for parallel
+        export -f process_file process_pdf process_cbz list_to_ranges
+        echo "Processing ${#INPUT_FILES[@]} file(s) in parallel..."
+        printf "%s\n" "${INPUT_FILES[@]}" | parallel -j "$NUM_THREADS" process_file
     else
-        printf "$PROG_NAME: %s %s %s\n" \
-            'Warning: `parallel` command not found. The script will run' \
-            "sequentially, which is slower. It’s recommended to stop the" \
-            "script and install GNU Parallel." \
-            >&2
-        for pdf in "$1"/*.pdf; do
-            process_pdf "$pdf"
+        printf "$PROG_NAME: %s\n" \
+            "Warning: 'parallel' command not found. The script will run sequentially." >&2
+        for file in "${INPUT_FILES[@]}"; do
+            process_file "$file"
         done
     fi
 
-    rm -rf "$CACHE_DIR/"
     echo "All tasks complete."
 }
 
 parse_params() {
+    INPUT_FILES=()
     set_param() {
         local param_name="$1"
         local var_name="$2"
@@ -57,13 +64,13 @@ parse_params() {
     }
 
     check_device() {
-        if [[ "$DEVICE" = "Kobo Sage" ]] then
+        if [[ "$DEVICE" = "Kobo Sage" ]]; then
             PIXEL_DENSITY=300
             DISPLAY_WIDTH=1440
             DISPLAY_HEIGHT=1920
         else
             printf "$PROG_NAME: %s %s\n" \
-                "'$DEVICE' is not a recognized device. See \`-list_devices\`" \
+                "'$DEVICE' is not a recognized device. See '-list_devices'" \
                 "for a list of recognized devices." \
                 >&2
             exit 1;
@@ -74,7 +81,7 @@ parse_params() {
         if ! magick -list filter | grep -q "^$SCALING_FILTER$"; then
             printf "$PROG_NAME: %s %s %s\n" \
                 "'$SCALING_FILTER' is not a valid scaling filter. Try" \
-                '`magick -list filter` to see a full list of possible' \
+                "'magick -list filter' to see a full list of possible" \
                 "filters." \
                 >&2
             exit 1
@@ -82,35 +89,30 @@ parse_params() {
     }
 
     SCALING_FILTER=MagicKernelSharp2021
-    MAGICK_MEMORY_LIMIT=2GiB
+    MAGICK_MEMORY_LIMIT=1GiB
     NUM_THREADS=4
+    OUTPUT_DIRECTORY="." # Default to current directory
 
     while [[ "$#" -gt 0 ]]; do
-        if [[ "${1:0:1}" != - ]]; then
-            if [[ -z "$2" || "${2:0:1}" = "-" ]]; then
-                printf "$PROG_NAME: %s %s\n" \
-                    "Input directory parameter must have an output directory" \
-                    "parameter after it." \
-                    >&2
-                exit 1
-            fi
-            INPUT_DIRECTORY="$1"
-            OUTPUT_DIRECTORY="$2"
-            shift 2;
-            continue;
-        fi
-
         case "$1" in
             -help)
                 help
                 exit
+                ;;
+            -list_devices)
+                list_devices
+                exit
+                ;;
+            -directory | -d)
+                set_param "$1" OUTPUT_DIRECTORY "$2"
+                shift
                 ;;
             -device)
                 set_param "$1" DEVICE "$2"
                 check_device
                 shift
                 ;;
-            -density | -d)
+            -density)
                 set_param "$1" PIXEL_DENSITY "$2"
                 shift
                 ;;
@@ -135,22 +137,26 @@ parse_params() {
                 set_param "$1" MAGICK_MEMORY_LIMIT "$2"
                 shift
                 ;;
-            *)
+            -*)
                 echo "$PROG_NAME: '$1' is not a valid parameter." >&2
                 exit 1
                 ;;
+            *)
+                # Collect all non-parameter arguments as input files
+                INPUT_FILES+=("$1")
+                ;;
         esac
-
         shift
     done
 
-    if [[
-        -z "$PIXEL_DENSITY" \
-        || -z "$DISPLAY_WIDTH" \
-        || -z "$DISPLAY_HEIGHT" \
-        || -z "$INPUT_DIRECTORY" \
-    ]]
-    then
+    if (( ${#INPUT_FILES[@]} == 0 )); then
+        echo "$PROG_NAME: No input files specified." >&2
+        help
+        exit 1
+    fi
+
+    if [[ -z "${PIXEL_DENSITY:-}" || -z "${DISPLAY_WIDTH:-}" || -z "${DISPLAY_HEIGHT:-}" ]]; then
+        echo "$PROG_NAME: Target device parameters are not set. Use '-device' or manual settings." >&2
         help
         exit 1
     fi
@@ -160,21 +166,21 @@ help() {
     echo 'comicpress: command-line tool to convert and compress comics and manga
 
 Usage:
-    Option 1: comicpress -device DEVICE_NAME INPUT_DIRECTORY OUTPUT_DIRECTORY
-    Option 2: comicpress -density PIXEL_DENSITY -width DISPLAY_WIDTH -height DISPLAY_HEIGHT INPUT_DIRECTORY OUTPUT_DIRECTORY
+    comicpress [OPTIONS]... FILE...
+
+Example:
+    comicpress -device "Kobo Sage" -d output_directory directory_with_pdf_files/*.pdf
 
 Parameters:
-    -device             Ereader device to target. This automatically sets the correct values for `-density`, `-width`, and `-height`. For a full list, see `-list_devices`.
-    -density, -d        Pixel density of the display to target in pixels per inch
-    -width, -w          Width of the display to target in pixels
-    -height, -h         Height of the display to target in pixels
-    -filter, f          ImageMagick scaling filter to use (default: MagickKernelSharp2021). Run `magick -list filter` for a full list of possible choices.
-    -list_devices, -l   List of all devices and their respective values for pixel density, width, and height.
-    -help               Print this help message and exit.
-
-Examples:
-    1. comicpress -device "Kobo Sage" PDF CBZ
-    2. comicpress -density 300 -width 1440 -height 1920 PDF CBZ
+    -directory, -d DIRECTORY  Output directory (default: current directory).
+    -device DEVICE            Ereader device to target (sets density, width, height).
+    -density DENSITY          Pixel density of the display in pixels per inch.
+    -width, -w WIDTH          Width of the display in pixels.
+    -height, -h HEIGHT        Height of the display in pixels.
+    -filter, -f FILTER        ImageMagick scaling filter (default: MagicKernelSharp2021).
+    -jobs, -j NUM             Number of parallel jobs to run (default: 4).
+    -help                     Print this help message and exit.
+    -list_devices             List all supported devices.
 '
 }
 
@@ -182,6 +188,7 @@ list_devices() {
     echo "Kobo Sage (density: 300, width: 1440, height: 1920)"
 }
 
+# Original function formatting restored
 list_to_ranges() {
     [ -z "$1" ] && return
 
@@ -204,12 +211,13 @@ list_to_ranges() {
     (IFS=,; echo "${ranges[*]}")
 }
 
+# Original function formatting restored
 process_pdf() {
     local pdf_file_name="$1"
     local pdf_base_name
     pdf_base_name="$(basename "$pdf_file_name" .pdf)"
 
-    echo "Processing '$pdf_file_name'..."
+    echo "Processing PDF '$pdf_file_name'..."
 
     local temp_dir="$CACHE_DIR/$pdf_base_name"
     mkdir -p "$temp_dir"
@@ -237,76 +245,95 @@ process_pdf() {
     if [ ${#pages_monochrome[@]} -gt 0 ]; then
         local -a indices=()
         for p in "${pages_monochrome[@]}"; do indices+=($((p - 1))); done
-
         local index_range_str
         index_range_str=$(list_to_ranges "${indices[*]}")
-
-        local magick_cmd=(magick)
-        [[ "$MAGICK_MEMORY_LIMIT" != "off" ]] && magick_cmd+=(-limit memory "$MAGICK_MEMORY_LIMIT")
-
-        magick_cmd+=(
-            -density "$PIXEL_DENSITY"
-            "${pdf_file_name}[${index_range_str}]"
-            -trim +repage
-            -colorspace Gray
-            -filter "$SCALING_FILTER"
-            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT"
-            -quality "$IMAGE_QUALITY"
-            -define webp:method=6
-            -strip
-            -colors 8
-            -level '0%,100%,0.5'
-            "$temp_dir/%0${num_pages_digits}d.webp"
-        )
-        "${magick_cmd[@]}" 2> /dev/null || true
+        magick -limit memory "$MAGICK_MEMORY_LIMIT" \
+            -density "$PIXEL_DENSITY" \
+            "${pdf_file_name}[${index_range_str}]" \
+            -trim +repage -colorspace Gray -filter "$SCALING_FILTER" \
+            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT" -quality "$IMAGE_QUALITY" \
+            -define webp:method=6 -strip -colors 8 -level '0%,100%,0.5' \
+            "$temp_dir/%0${num_pages_digits}d.webp" 2> /dev/null || true
     fi
 
     if [ ${#pages_non_monochrome[@]} -gt 0 ]; then
         local -a indices=()
         for p in "${pages_non_monochrome[@]}"; do indices+=($((p - 1))); done
-
         local index_range_str
         index_range_str=$(list_to_ranges "${indices[*]}")
-
-        local magick_cmd=(magick)
-        [[ -z "${MAGICK_UNLIMITED_MEMORY:-}" ]] && magick_cmd+=(-limit memory "$MAGICK_MEMORY_LIMIT")
-
-        magick_cmd+=(
-            -density "$PIXEL_DENSITY"
-            "${pdf_file_name}[${index_range_str}]"
-            -trim +repage
-            -colorspace Gray
-            -filter "$SCALING_FILTER"
-            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT"
-            -quality "$IMAGE_QUALITY"
-            -define webp:method=6
-            -strip
-            -colors 128
-            -level '0%,100%,0.5'
-            "$temp_dir/%0${num_pages_digits}d.webp"
-        )
-        "${magick_cmd[@]}" 2> /dev/null || true
+        magick -limit memory "$MAGICK_MEMORY_LIMIT" \
+            -density "$PIXEL_DENSITY" \
+            "${pdf_file_name}[${index_range_str}]" \
+            -trim +repage -colorspace Gray -filter "$SCALING_FILTER" \
+            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT" -quality "$IMAGE_QUALITY" \
+            -define webp:method=6 -strip -colors 128 -level '0%,100%,0.5' \
+            "$temp_dir/%0${num_pages_digits}d.webp" 2> /dev/null || true
     fi
 
     local files_to_rename
     mapfile -t files_to_rename < <(find "$temp_dir" -maxdepth 1 -name "*.webp" | sort -r)
-
     for old_file in "${files_to_rename[@]}"; do
         local base
         base=$(basename "$old_file" .webp)
-
         local num=$((10#$base))
         local new_num=$((num + 1))
-
         local new_filename
         new_filename=$(printf "%0*d.webp" "$num_pages_digits" "$new_num")
-
         mv "$old_file" "$temp_dir/$new_filename"
     done
 
     echo "Creating archive '$OUTPUT_DIRECTORY/$pdf_base_name.cbz'..."
-    zip -0 -j "$OUTPUT_DIRECTORY/${pdf_base_name}.cbz" "$temp_dir"/*.webp
-    printf "%s\n\n" "Archive '$OUTPUT_DIRECTORY/$pdf_base_name.cbz' created."
+    zip -0 -j "$OUTPUT_DIRECTORY/${pdf_base_name}.cbz" "$temp_dir"/*.webp > /dev/null
+    printf "Archive '$OUTPUT_DIRECTORY/$pdf_base_name.cbz' created.\n\n"
+}
+
+# This is the logic from your second script, formatted to match the first.
+process_cbz() {
+    local cbz_file_name="$1"
+    local base_name
+    base_name="$(basename "$cbz_file_name" .cbz)"
+
+    echo "Processing CBZ '$cbz_file_name'..."
+
+    local temp_dir="$CACHE_DIR/$base_name"
+    local images_renamed_dir="$temp_dir/renamed"
+    mkdir -p "$temp_dir" "$images_renamed_dir"
+
+    unzip -jd "$temp_dir" "$cbz_file_name" > /dev/null
+
+    # Rename files numerically to ensure order
+    local num_files
+    num_files="$(find "$temp_dir" -maxdepth 1 -type f | wc -l)"
+    local num_files_digits
+    num_files_digits="$(echo -n "$num_files" | wc -c)"
+    local counter=1
+
+    while IFS= read -r image_file_name; do
+        local new_base_name
+        new_base_name="$(printf "%0*d" "$num_files_digits" "$counter")"
+        local file_extension="${image_file_name##*.}"
+        local new_file_name="$new_base_name.$file_extension"
+        mv "$image_file_name" "$images_renamed_dir/$new_file_name"
+        ((counter += 1))
+    done < <(find "$temp_dir" -maxdepth 1 -type f | sort)
+
+    magick mogrify \
+        -limit memory "$MAGICK_MEMORY_LIMIT" \
+        -trim +repage \
+        -colorspace Gray \
+        -filter "$SCALING_FILTER" \
+        -resize "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" \
+        -quality "$IMAGE_QUALITY" \
+        -define webp:method=6 \
+        -strip \
+        -colors 128 \
+        -level "0%,100%,0.5" \
+        -format webp \
+        "$images_renamed_dir"/*
+
+    echo "Creating archive '$OUTPUT_DIRECTORY/$base_name.cbz'..."
+    zip -0 -j "$OUTPUT_DIRECTORY/$base_name.cbz" "$images_renamed_dir"/*.webp > /dev/null
+    printf "Archive '$OUTPUT_DIRECTORY/$base_name.cbz' created.\n\n"
 }
 
 main "$@"

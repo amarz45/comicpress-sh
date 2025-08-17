@@ -60,19 +60,19 @@ sudo make uninstall
 1. Using a device profile: The easiest way to run the script. It automatically configures the resolution and density for your device.
 
    ```sh
-   comicpress -device "Kobo Sage" input_manga output_dir
+   comicpress -device "Kobo Sage" -d output_dir input_manga/*
    ```
 
 2. Using manual settings: Provides full control over the output resolution and density.
 
    ```sh
-   comicpress -density 300 -width 1440 -height 1920 input_manga output_dir
+   comicpress -density 300 -width 1440 -height 1920 -d output_dir input_manga/*
    ```
 
 3. Changing the scaling filter: Overrides the default filter for a different look.[^1]
 
    ```sh
-   comicpress -device "Kobo Sage" -filter Lanczos input_manga output_dir
+   comicpress -device "Kobo Sage" -filter Lanczos -d output_dir input_manga/*
    ```
 
 You can view a full list of options by running `comicpress -help`.
