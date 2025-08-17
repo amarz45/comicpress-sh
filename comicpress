@@ -5,8 +5,8 @@ set -euo pipefail
 PROG_NAME="comicpress"
 CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 CACHE_DIR=$(mktemp -d "$CACHE_HOME/$PROG_NAME/XXXXXX")
-# Clean up the cache directory on exit
 trap 'rm -rf "$CACHE_DIR"' EXIT
+
 TMPDIR="$CACHE_HOME/parallel"
 MAGICK_TEMPORARY_PATH="$CACHE_HOME/magick"
 
@@ -14,34 +14,22 @@ IMAGE_QUALITY=100
 
 main() {
     parse_params "$@"
-
     mkdir -p "$OUTPUT_DIRECTORY" "$CACHE_DIR" "$MAGICK_TEMPORARY_PATH"
-
-    # A wrapper function is needed for GNU Parallel to decide
-    # whether to process a PDF or a CBZ.
-    process_file() {
-        local input_file="$1"
-        if [[ "$input_file" == *.pdf ]]; then
-            process_pdf "$input_file"
-        elif [[ "$input_file" == *.cbz ]]; then
-            process_cbz "$input_file"
-        else
-             echo "$PROG_NAME: Skipping unsupported file '$input_file'." >&2
-        fi
-    }
 
     if command -v parallel > /dev/null; then
         mkdir -p "$TMPDIR"
+
         export CACHE_DIR PIXEL_DENSITY MAGICK_MEMORY_LIMIT DISPLAY_WIDTH \
             DISPLAY_HEIGHT SCALING_FILTER IMAGE_QUALITY OUTPUT_DIRECTORY \
             TMPDIR MAGICK_TEMPORARY_PATH
-        # Export all needed functions for parallel
         export -f process_file process_pdf process_cbz list_to_ranges
-        echo "Processing ${#INPUT_FILES[@]} file(s) in parallel..."
+
         printf "%s\n" "${INPUT_FILES[@]}" | parallel -j "$NUM_THREADS" process_file
     else
-        printf "$PROG_NAME: %s\n" \
-            "Warning: 'parallel' command not found. The script will run sequentially." >&2
+        printf "$PROG_NAME: %s %s\n" \
+            "Warning: 'parallel' command not found. The script will run" \
+            "sequentially." \
+            >&2
         for file in "${INPUT_FILES[@]}"; do
             process_file "$file"
         done
@@ -91,7 +79,7 @@ parse_params() {
     SCALING_FILTER=MagicKernelSharp2021
     MAGICK_MEMORY_LIMIT=1GiB
     NUM_THREADS=4
-    OUTPUT_DIRECTORY="." # Default to current directory
+    OUTPUT_DIRECTORY="."
 
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -142,7 +130,6 @@ parse_params() {
                 exit 1
                 ;;
             *)
-                # Collect all non-parameter arguments as input files
                 INPUT_FILES+=("$1")
                 ;;
         esac
@@ -155,8 +142,16 @@ parse_params() {
         exit 1
     fi
 
-    if [[ -z "${PIXEL_DENSITY:-}" || -z "${DISPLAY_WIDTH:-}" || -z "${DISPLAY_HEIGHT:-}" ]]; then
-        echo "$PROG_NAME: Target device parameters are not set. Use '-device' or manual settings." >&2
+    if [[
+        -z "${PIXEL_DENSITY:-}" \
+        || -z "${DISPLAY_WIDTH:-}" \
+        || -z "${DISPLAY_HEIGHT:-}" \
+    ]]
+    then
+        printf "$PROG_NAME: %s %s\n" \
+            "Target device parameters are not set. Use '-device' or manual" \
+            "settings." \
+            >&2
         help
         exit 1
     fi
@@ -188,9 +183,10 @@ list_devices() {
     echo "Kobo Sage (density: 300, width: 1440, height: 1920)"
 }
 
-# Original function formatting restored
 list_to_ranges() {
-    [ -z "$1" ] && return
+    if [[ -z "$1" ]]; then
+        return
+    fi
 
     local -a nums=($1)
     local ranges=()
@@ -201,17 +197,35 @@ list_to_ranges() {
         if [[ ${nums[i]} -eq $((end + 1)) ]]; then
             end=${nums[i]}
         else
-            [ "$start" -eq "$end" ] && ranges+=("$start") || ranges+=("$start-$end")
+            if [[ "$start" -eq "$end" ]]; then
+                ranges+=("$start")
+            else
+                ranges+=("$start-$end")
+            fi
             start=${nums[i]}
             end=${nums[i]}
         fi
     done
-    [ "$start" -eq "$end" ] && ranges+=("$start") || ranges+=("$start-$end")
+    if [[ "$start" -eq "$end" ]]; then
+        ranges+=("$start")
+    else
+        ranges+=("$start-$end")
+    fi
 
     (IFS=,; echo "${ranges[*]}")
 }
 
-# Original function formatting restored
+process_file() {
+    local input_file="$1"
+    if [[ "$input_file" == *.pdf ]]; then
+        process_pdf "$input_file"
+    elif [[ "$input_file" == *.cbz ]]; then
+        process_cbz "$input_file"
+    else
+        echo "$PROG_NAME: Skipping unsupported file '$input_file'." >&2
+    fi
+}
+
 process_pdf() {
     local pdf_file_name="$1"
     local pdf_base_name
@@ -240,38 +254,59 @@ process_pdf() {
     local all_pages
     mapfile -t all_pages < <(seq 1 "$num_pages")
     local pages_monochrome
-    mapfile -t pages_monochrome < <(comm -23 <(printf "%s\n" "${all_pages[@]}") <(printf "%s\n" "${pages_non_monochrome[@]}"))
+    mapfile -t pages_monochrome < \
+        <(comm -23 <(printf "%s\n" "${all_pages[@]}") \
+        <(printf "%s\n" "${pages_non_monochrome[@]}"))
 
     if [ ${#pages_monochrome[@]} -gt 0 ]; then
         local -a indices=()
-        for p in "${pages_monochrome[@]}"; do indices+=($((p - 1))); done
-        local index_range_str
-        index_range_str=$(list_to_ranges "${indices[*]}")
-        magick -limit memory "$MAGICK_MEMORY_LIMIT" \
+        for p in "${pages_monochrome[@]}"; do
+            indices+=($((p - 1)))
+        done
+        local index_range_str=$(list_to_ranges "${indices[*]}")
+        magick \
+            -limit memory "$MAGICK_MEMORY_LIMIT" \
             -density "$PIXEL_DENSITY" \
             "${pdf_file_name}[${index_range_str}]" \
-            -trim +repage -colorspace Gray -filter "$SCALING_FILTER" \
-            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT" -quality "$IMAGE_QUALITY" \
-            -define webp:method=6 -strip -colors 8 -level '0%,100%,0.5' \
-            "$temp_dir/%0${num_pages_digits}d.webp" 2> /dev/null || true
+            -trim +repage \
+            -colorspace Gray \
+            -filter "$SCALING_FILTER" \
+            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT" \
+            -quality "$IMAGE_QUALITY" \
+            -define webp:method=6 \
+            -strip \
+            -colors 8 \
+            -level 0%,100%,0.5 \
+            "$temp_dir/%0${num_pages_digits}d.webp" \
+            2> /dev/null || true
     fi
 
     if [ ${#pages_non_monochrome[@]} -gt 0 ]; then
         local -a indices=()
-        for p in "${pages_non_monochrome[@]}"; do indices+=($((p - 1))); done
-        local index_range_str
-        index_range_str=$(list_to_ranges "${indices[*]}")
-        magick -limit memory "$MAGICK_MEMORY_LIMIT" \
+        for p in "${pages_non_monochrome[@]}"; do
+            indices+=($((p - 1)))
+        done
+        local index_range_str=$(list_to_ranges "${indices[*]}")
+        magick \
+            -limit memory "$MAGICK_MEMORY_LIMIT" \
             -density "$PIXEL_DENSITY" \
             "${pdf_file_name}[${index_range_str}]" \
-            -trim +repage -colorspace Gray -filter "$SCALING_FILTER" \
-            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT" -quality "$IMAGE_QUALITY" \
-            -define webp:method=6 -strip -colors 128 -level '0%,100%,0.5' \
-            "$temp_dir/%0${num_pages_digits}d.webp" 2> /dev/null || true
+            -trim +repage \
+            -colorspace Gray \
+            -filter "$SCALING_FILTER" \
+            -resize "${DISPLAY_WIDTH}x$DISPLAY_HEIGHT" \
+            -quality "$IMAGE_QUALITY" \
+            -define webp:method=6 \
+            -strip \
+            -colors 128 \
+            -level 0%,100%,0.5 \
+            "$temp_dir/%0${num_pages_digits}d.webp" \
+            2> /dev/null || true
     fi
 
     local files_to_rename
-    mapfile -t files_to_rename < <(find "$temp_dir" -maxdepth 1 -name "*.webp" | sort -r)
+    mapfile -t files_to_rename < \
+        <(find "$temp_dir" -maxdepth 1 -name "*.webp" | sort -r)
     for old_file in "${files_to_rename[@]}"; do
         local base
         base=$(basename "$old_file" .webp)
@@ -283,7 +318,11 @@ process_pdf() {
     done
 
     echo "Creating archive '$OUTPUT_DIRECTORY/$pdf_base_name.cbz'..."
-    zip -0 -j "$OUTPUT_DIRECTORY/${pdf_base_name}.cbz" "$temp_dir"/*.webp > /dev/null
+    zip \
+        -0 -j \
+        "$OUTPUT_DIRECTORY/${pdf_base_name}.cbz" \
+        "$temp_dir"/*.webp \
+        > /dev/null
     printf "Archive '$OUTPUT_DIRECTORY/$pdf_base_name.cbz' created.\n\n"
 }
 
@@ -302,15 +341,12 @@ process_cbz() {
     unzip -jd "$temp_dir" "$cbz_file_name" > /dev/null
 
     # Rename files numerically to ensure order
-    local num_files
-    num_files="$(find "$temp_dir" -maxdepth 1 -type f | wc -l)"
-    local num_files_digits
-    num_files_digits="$(echo -n "$num_files" | wc -c)"
+    local num_files="$(find "$temp_dir" -maxdepth 1 -type f | wc -l)"
+    local num_files_digits="$(echo -n "$num_files" | wc -c)"
     local counter=1
 
     while IFS= read -r image_file_name; do
-        local new_base_name
-        new_base_name="$(printf "%0*d" "$num_files_digits" "$counter")"
+        local new_base_name="$(printf "%0*d" "$num_files_digits" "$counter")"
         local file_extension="${image_file_name##*.}"
         local new_file_name="$new_base_name.$file_extension"
         mv "$image_file_name" "$images_renamed_dir/$new_file_name"
@@ -329,10 +365,15 @@ process_cbz() {
         -colors 128 \
         -level "0%,100%,0.5" \
         -format webp \
-        "$images_renamed_dir"/*
+        "$images_renamed_dir"/* \
+        2> /dev/null || true
 
     echo "Creating archive '$OUTPUT_DIRECTORY/$base_name.cbz'..."
-    zip -0 -j "$OUTPUT_DIRECTORY/$base_name.cbz" "$images_renamed_dir"/*.webp > /dev/null
+    zip \
+        -0 -j \
+        "$OUTPUT_DIRECTORY/$base_name.cbz" \
+        "$images_renamed_dir"/*.webp \
+        > /dev/null
     printf "Archive '$OUTPUT_DIRECTORY/$base_name.cbz' created.\n\n"
 }
 
