@@ -22,7 +22,36 @@ declare -A CONFIG=(
 )
 
 declare -A DEVICES=(
+    # Kindle
+    ["Kindle (11th Gen, 2022)"]="300 1072 1448"
+    ["Kindle Paperwhite (11th Gen)"]="300 1236 1648"
+    ["Kindle Paperwhite Signature Edition"]="300 1236 1648"
+    ["Kindle Oasis (3rd Gen)"]="300 1264 1680"
+    ["Kindle Scribe"]="300 1860 2480"
+
+    # Kobo
+    ["Kobo Clara BW"]="300 1072 1448"
+    ["Kobo Clara Colour"]="300 1072 1448"
+    ["Kobo Libra Colour"]="300 1264 1680"
     ["Kobo Sage"]="300 1440 1920"
+    ["Kobo Elipsa 2E"]="227 1404 1872"
+
+    # PocketBook
+    ["PocketBook Verse"]="212 758 1024"
+    ["PocketBook Verse Pro"]="300 1072 1448"
+    ["PocketBook InkPad 4"]="300 1404 1872"
+    ["PocketBook InkPad Color 3"]="300 1404 1872"
+    ["PocketBook Era"]="300 1264 1680"
+
+    # Boox
+    ["Boox Palma"]="300 824 1648"
+    ["Boox Page"]="300 1264 1680"
+    ["Boox Note Air3 C"]="300 1404 1872"
+    ["Boox Tab Ultra C Pro"]="300 1860 2480"
+    ["Boox Tab X"]="207 1600 2560"
+
+    # reMarkable
+    ["reMarkable 2"]="226 1872 1404"
 )
 
 CACHE_DIR=$(mktemp -d "${CONFIG[cache_home]}/${CONFIG[prog_name]}/XXXXXX")
@@ -149,16 +178,6 @@ parse_params() {
         help
         die "No input files specified."
     fi
-
-    #if [[
-    #    -z "${CONFIG[pixel_density]:-}" \
-    #    || -z "${CONFIG[display_width]:-}" \
-    #    || -z "${CONFIG[display_height]:-}" \
-    #]]
-    #then
-    #    help
-    #    die "Target device parameters are not set. Use '-device' or manual settings."
-    #fi
 }
 
 help() {
@@ -178,9 +197,9 @@ Parameters:
     -height, -h HEIGHT          Height of the display in pixels (default: unset, unless the `-device` option is used).
     -filter, -f FILTER          ImageMagick scaling filter (default: MagicKernelSharp2021).
     -jobs, -j NUM               Number of parallel jobs to run (default: the number of threads on the system).
-    -help                       Print this help message and exit.
-    -list_devices               List all supported devices.
     -magick_memory_limit LIMIT  Limits the amount of memory each ImageMagick instance is allowed to use (e.g., 1GiB) (default: unset).
+    -list_devices               List all supported devices.
+    -help                       Print this help message and exit.
 '
 }
 
