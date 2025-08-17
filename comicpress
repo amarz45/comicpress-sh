@@ -39,7 +39,7 @@ main() {
         mkdir -p "$TMPDIR"
 
         export CONFIG_STR="$(declare -p CONFIG)"
-        export CACHE_DIR
+        export CACHE_DIR TMPDIR MAGICK_TEMPORARY_PATH
         export -f \
             process_file process_pdf process_cbz list_to_ranges die \
             create_cbz_archive get_magick_common_params run_magick_convert \
@@ -240,8 +240,10 @@ create_cbz_archive() {
 }
 
 get_magick_common_params() {
+    if [[ "${CONFIG[magick_memory_limit]}" != off ]]; then
+        printf "%s\n" -limit memory "${CONFIG[magick_memory_limit]}"
+    fi
     printf "%s\n" \
-        -limit memory "${CONFIG[magick_memory_limit]}" \
         -trim +repage \
         -colorspace Gray \
         -filter "${CONFIG[scaling_filter]}" \
