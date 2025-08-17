@@ -12,13 +12,13 @@ declare -A CONFIG=(
     [cache_home]="${XDG_CACHE_HOME:-$HOME/.cache}"
     [image_quality]=100
     [scaling_filter]="MagicKernelSharp2021"
-    [magick_memory_limit]="1GiB"
-    [num_threads]=4
+    [magick_memory_limit]="unset"
+    [num_threads]="$(nproc)"
     [output_directory]="."
     [device]=""
-    [pixel_density]=""
-    [display_width]=""
-    [display_height]=""
+    [pixel_density]="300"
+    [display_width]="unset"
+    [display_height]="unset"
 )
 
 declare -A DEVICES=(
@@ -150,15 +150,15 @@ parse_params() {
         die "No input files specified."
     fi
 
-    if [[
-        -z "${CONFIG[pixel_density]:-}" \
-        || -z "${CONFIG[display_width]:-}" \
-        || -z "${CONFIG[display_height]:-}" \
-    ]]
-    then
-        help
-        die "Target device parameters are not set. Use '-device' or manual settings."
-    fi
+    #if [[
+    #    -z "${CONFIG[pixel_density]:-}" \
+    #    || -z "${CONFIG[display_width]:-}" \
+    #    || -z "${CONFIG[display_height]:-}" \
+    #]]
+    #then
+    #    help
+    #    die "Target device parameters are not set. Use '-device' or manual settings."
+    #fi
 }
 
 help() {
@@ -171,15 +171,16 @@ Example:
     comicpress -device "Kobo Sage" -d output_directory directory_with_pdf_files/*.pdf
 
 Parameters:
-    -directory, -d DIRECTORY  Output directory (default: current directory).
-    -device DEVICE            Ereader device to target (sets density, width, height).
-    -density DENSITY          Pixel density of the display in pixels per inch.
-    -width, -w WIDTH          Width of the display in pixels.
-    -height, -h HEIGHT        Height of the display in pixels.
-    -filter, -f FILTER        ImageMagick scaling filter (default: MagicKernelSharp2021).
-    -jobs, -j NUM             Number of parallel jobs to run (default: 4).
-    -help                     Print this help message and exit.
-    -list_devices             List all supported devices.
+    -directory, -d DIRECTORY    Output directory (default: current directory).
+    -device DEVICE              Ereader device to target (sets density, width, height).
+    -density DENSITY            Pixel density of the display in pixels per inch (default: 300, unless the `-device` option is used).
+    -width, -w WIDTH            Width of the display in pixels (default: unset, unless the `-device` option is used).
+    -height, -h HEIGHT          Height of the display in pixels (default: unset, unless the `-device` option is used).
+    -filter, -f FILTER          ImageMagick scaling filter (default: MagicKernelSharp2021).
+    -jobs, -j NUM               Number of parallel jobs to run (default: the number of threads on the system).
+    -help                       Print this help message and exit.
+    -list_devices               List all supported devices.
+    -magick_memory_limit LIMIT  Limits the amount of memory each ImageMagick instance is allowed to use (e.g., 1GiB) (default: unset).
 '
 }
 
@@ -224,7 +225,6 @@ list_to_ranges() {
     (IFS=,; echo "${ranges[*]}")
 }
 
-# Requirement 4: Deduplicate the ZIP archiving logic.
 create_cbz_archive() {
     local output_file_basename="$1"
     local image_source_dir="$2"
@@ -240,14 +240,18 @@ create_cbz_archive() {
 }
 
 get_magick_common_params() {
-    if [[ "${CONFIG[magick_memory_limit]}" != off ]]; then
+    if [[ "${CONFIG[magick_memory_limit]}" != unset ]]; then
         printf "%s\n" -limit memory "${CONFIG[magick_memory_limit]}"
     fi
     printf "%s\n" \
         -trim +repage \
         -colorspace Gray \
-        -filter "${CONFIG[scaling_filter]}" \
-        -resize "${CONFIG[display_width]}x${CONFIG[display_height]}" \
+        -filter "${CONFIG[scaling_filter]}"
+    if [[ "${CONFIG[display_width]}" != unset && "${CONFIG[display_height]}" != unset ]]; then
+        printf "%s\n" \
+            -resize "${CONFIG[display_width]}x${CONFIG[display_height]}"
+    fi
+    printf "%s\n" \
         -quality "${CONFIG[image_quality]}" \
         -define webp:method=6 \
         -strip \
