@@ -70,7 +70,7 @@ main() {
         export CONFIG_STR="$(declare -p CONFIG)"
         export CACHE_DIR TMPDIR MAGICK_TEMPORARY_PATH
         export -f \
-            process_file process_pdf process_cbz list_to_ranges die \
+            process_file process_pdf process_archive list_to_ranges die \
             create_cbz_archive get_magick_common_params run_magick_convert \
             run_magick_mogrify
 
@@ -317,8 +317,8 @@ process_file() {
     local input_file="$1"
     if [[ "$input_file" == *.pdf ]]; then
         process_pdf "$input_file"
-    elif [[ "$input_file" == *.cbz ]]; then
-        process_cbz "$input_file"
+    elif [[ "$input_file" == *.cbz || "$input_file" == *.cbr ]]; then
+        process_archive "$input_file"
     else
         echo "${CONFIG[prog_name]}: Skipping unsupported file '$input_file'." >&2
     fi
@@ -402,18 +402,39 @@ process_pdf() {
     create_cbz_archive "$pdf_base_name" "$temp_dir"
 }
 
-process_cbz() {
-    local cbz_file_name="$1"
+process_archive() {
+    local archive_file_name="$1"
     local base_name
-    base_name="$(basename "$cbz_file_name" .cbz)"
+    local extension
+    local temp_dir
+    local -a extract_cmd
 
-    echo "Processing CBZ '$cbz_file_name'..."
+    if [[ "$archive_file_name" == *.cbz ]]; then
+        extension=".cbz"
+    elif [[ "$archive_file_name" == *.cbr ]]; then
+        extension=".cbr"
+    else
+        die "Unsupported archive type passed to process_archive: '$archive_file_name'"
+    fi
 
-    local temp_dir="$CACHE_DIR/$base_name"
+    base_name="$(basename "$archive_file_name" "$extension")"
+    temp_dir="$CACHE_DIR/$base_name"
     local images_renamed_dir="$temp_dir/renamed"
+
+    echo "Processing Archive '$archive_file_name'..."
+
     mkdir -p "$temp_dir" "$images_renamed_dir"
 
-    unzip -jd "$temp_dir" "$cbz_file_name" > /dev/null
+    if [[ "$extension" == ".cbz" ]]; then
+        extract_cmd=(unzip -jd "$temp_dir" "$archive_file_name")
+    elif [[ "$extension" == ".cbr" ]]; then
+        if ! command -v unrar >/dev/null; then
+            die "unrar command not found, but is required to process CBR files."
+        fi
+        extract_cmd=(unrar e "$archive_file_name" "$temp_dir/")
+    fi
+
+    "${extract_cmd[@]}"
 
     local num_files="$(find "$temp_dir" -maxdepth 1 -type f | wc -l)"
     local num_files_digits="$(echo -n "$num_files" | wc -c)"
