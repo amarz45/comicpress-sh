@@ -285,7 +285,7 @@ run_magick_convert() {
     local -a common_params
     mapfile -t common_params < <(get_magick_common_params)
 
-    if echo "$is_non_monochrome" > /dev/null; then
+    if [[ "$is_non_monochrome" -eq 1 ]]; then
         magick \
             -density "${CONFIG[pixel_density]}" \
             "$input_file_with_ranges" \
