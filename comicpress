@@ -404,8 +404,10 @@ process_archive() {
     done < <(find "$temp_dir" -maxdepth 1 -type f | sort)
 
     for filename in "$images_renamed_dir"/*; do
-        base_name="$(echo "$filename" | rev | cut -d . -f 2- | cut -d / -f 1 | rev)"
-        run_magick_convert "$filename" "$images_renamed_dir/$base_name.webp" 1
+        img_base_name="$(
+            echo "$filename" | rev | cut -d . -f 2- | cut -d / -f 1 | rev
+        )"
+        run_magick_convert "$filename" "$images_renamed_dir/$img_base_name.webp" 1
     done
 
     create_cbz_archive "$base_name" "$images_renamed_dir"
