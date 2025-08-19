@@ -258,22 +258,32 @@ create_cbz_archive() {
 }
 
 get_magick_common_params() {
+    local -n params_ref="$1"
+
     if [[ "${CONFIG[magick_memory_limit]}" != unset ]]; then
-        printf "%s\n" -limit memory "${CONFIG[magick_memory_limit]}"
+        params_ref+=(-limit memory "${CONFIG[magick_memory_limit]}")
     fi
-    printf "%s\n" \
-        -trim +repage \
-        -colorspace Gray \
-        -filter "${CONFIG[scaling_filter]}"
-    if [[ "${CONFIG[display_width]}" != unset && "${CONFIG[display_height]}" != unset ]]; then
-        printf "%s\n" \
+    params_ref+=(
+        -trim +repage -colorspace Gray -filter "${CONFIG[scaling_filter]}"
+    )
+    if [[
+        "${CONFIG[display_width]}" != unset \
+        && "${CONFIG[display_height]}" != unset \
+    ]]
+    then
+        params_ref+=(
             -resize "${CONFIG[display_width]}x${CONFIG[display_height]}"
+        )
     fi
-    printf "%s\n" \
-        -clahe "25x25%+256+3" "(" +clone -level 0%,100%,0.5 ")" -compose Darken -composite \
-        -strip
+    params_ref+=(
+        -clahe "25x25%+256+3" \
+        "(" +clone -level 0%,100%,0.5 ")" \
+        -compose Darken \
+        -composite \
+        -strip \
+    )
     if [[ "${CONFIG[image_quality]}" != unset ]]; then
-        printf "%s\n" -quality "${CONFIG[image_quality]}"
+        params_ref+=(-quality "${CONFIG[image_quality]}")
     fi
 }
 
@@ -283,10 +293,9 @@ run_magick_convert() {
     local is_non_monochrome="$3"
 
     local -a common_params
-    mapfile -t common_params < <(get_magick_common_params)
+    get_magick_common_params common_params
 
-    extra_params=()
-
+    local -a extra_params=()
     if [[ "$is_non_monochrome" -eq 1 ]]; then
         extra_params=(-define webp:lossless=true -colors 8)
     fi
