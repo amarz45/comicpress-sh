@@ -409,7 +409,7 @@ process_archive() {
         extract_cmd=(unrar e "$archive_file_name" "$temp_dir/")
     fi
 
-    "${extract_cmd[@]}"
+    "${extract_cmd[@]}" > /dev/null
 
     local num_files="$(find "$temp_dir" -maxdepth 1 -type f | wc -l)"
     local num_files_digits="$(echo -n "$num_files" | wc -c)"
