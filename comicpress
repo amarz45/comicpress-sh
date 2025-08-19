@@ -254,7 +254,7 @@ create_cbz_archive() {
         "$output_cbz_path" \
         "$image_source_dir"/*.webp \
         > /dev/null
-    printf "Archive '$output_cbz_path' created.\n\n"
+    echo "Archive '$output_cbz_path' created.\n\n"
 }
 
 get_magick_common_params() {
