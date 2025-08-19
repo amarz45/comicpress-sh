@@ -285,23 +285,19 @@ run_magick_convert() {
     local -a common_params
     mapfile -t common_params < <(get_magick_common_params)
 
+    extra_params=()
+
     if [[ "$is_non_monochrome" -eq 1 ]]; then
-        magick \
-            -density "${CONFIG[pixel_density]}" \
-            "$input_file_with_ranges" \
-            "${common_params[@]}" \
-            "$output_pattern" \
-            2> /dev/null || true
-    else
-        magick \
-            -density "${CONFIG[pixel_density]}" \
-            "$input_file_with_ranges" \
-            "${common_params[@]}" \
-            -define webp:lossless=true \
-            -colors 8 \
-            "$output_pattern" \
-            2> /dev/null || true
+        extra_params=(-define webp:lossless=true -colors 8)
     fi
+
+    magick \
+        -density "${CONFIG[pixel_density]}" \
+        "$input_file_with_ranges" \
+        "${common_params[@]}" \
+        "${extra_params[@]}"
+        "$output_pattern" \
+        2> /dev/null || true
 }
 
 process_file() {
