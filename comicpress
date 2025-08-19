@@ -71,8 +71,7 @@ main() {
         export CACHE_DIR TMPDIR MAGICK_TEMPORARY_PATH
         export -f \
             process_file process_pdf process_archive list_to_ranges die \
-            create_cbz_archive get_magick_common_params run_magick_convert \
-            run_magick_mogrify
+            create_cbz_archive get_magick_common_params run_magick_convert
 
         printf "%s\n" "${INPUT_FILES[@]}" \
             | parallel -j "${CONFIG[num_threads]}" process_file
@@ -291,7 +290,6 @@ run_magick_convert() {
             -density "${CONFIG[pixel_density]}" \
             "$input_file_with_ranges" \
             "${common_params[@]}" \
-            -scene 1 \
             "$output_pattern" \
             2> /dev/null || true
     else
@@ -301,25 +299,9 @@ run_magick_convert() {
             "${common_params[@]}" \
             -define webp:lossless=true \
             -colors 8 \
-            -scene 1 \
             "$output_pattern" \
             2> /dev/null || true
     fi
-}
-
-run_magick_mogrify() {
-    local image_dir="$1"
-    local colors="$2"
-
-    local -a common_params
-    mapfile -t common_params < <(get_magick_common_params)
-
-    magick mogrify \
-        "${common_params[@]}" \
-        -colors "$colors" \
-        -format webp \
-        "$image_dir"/* \
-        2> /dev/null || true
 }
 
 process_file() {
@@ -382,7 +364,6 @@ process_archive() {
     local base_name
     local extension
     local temp_dir
-    local -a extract_cmd
 
     if [[ "$archive_file_name" == *.cbz ]]; then
         extension=".cbz"
@@ -401,15 +382,14 @@ process_archive() {
     mkdir -p "$temp_dir" "$images_renamed_dir"
 
     if [[ "$extension" == ".cbz" ]]; then
-        extract_cmd=(unzip -jd "$temp_dir" "$archive_file_name")
+        unzip -qjd "$temp_dir" "$archive_file_name"
     elif [[ "$extension" == ".cbr" ]]; then
         if ! command -v unrar >/dev/null; then
             die "unrar command not found, but is required to process CBR files."
         fi
-        extract_cmd=(unrar e "$archive_file_name" "$temp_dir/")
+        echo "$archive_file_name" "$temp_dir"
+        unrar e -inul "$archive_file_name" "$temp_dir/"
     fi
-
-    "${extract_cmd[@]}" > /dev/null
 
     local num_files="$(find "$temp_dir" -maxdepth 1 -type f | wc -l)"
     local num_files_digits="$(echo -n "$num_files" | wc -c)"
@@ -423,7 +403,10 @@ process_archive() {
         ((counter += 1))
     done < <(find "$temp_dir" -maxdepth 1 -type f | sort)
 
-    run_magick_mogrify "$images_renamed_dir" 128
+    for filename in "$images_renamed_dir"/*; do
+        base_name="$(echo "$filename" | rev | cut -d . -f 2- | cut -d / -f 1 | rev)"
+        run_magick_convert "$filename" "$images_renamed_dir/$base_name.webp" 1
+    done
 
     create_cbz_archive "$base_name" "$images_renamed_dir"
 }
