@@ -11,6 +11,7 @@ declare -A CONFIG=(
     [prog_name]="comicpress"
     [cache_home]="${XDG_CACHE_HOME:-$HOME/.cache}"
     [image_quality]="unset"
+    [colorspace]="Gray"
     [scaling_filter]="MagicKernelSharp2021"
     [magick_memory_limit]="unset"
     [num_threads]="$(nproc)"
@@ -150,6 +151,10 @@ parse_params() {
                 set_param "$1" display_height "$2"
                 shift
                 ;;
+            -colorspace | -c)
+                set_param "$1" colorspace "$2"
+                shift
+                ;;
             -filter | -f)
                 set_param "$1" scaling_filter "$2"
                 check_filter
@@ -194,6 +199,7 @@ Parameters:
     -density DENSITY            Pixel density of the display in pixels per inch (default: 300, unless the `-device` option is used).
     -width, -w WIDTH            Width of the display in pixels (default: unset, unless the `-device` option is used).
     -height, -h HEIGHT          Height of the display in pixels (default: unset, unless the `-device` option is used).
+    -colorspace, -c COLORSPACE  Colorspace (default: Gray).
     -filter, -f FILTER          ImageMagick scaling filter (default: MagicKernelSharp2021).
     -jobs, -j NUM               Number of parallel jobs to run (default: the number of threads on the system).
     -magick_memory_limit LIMIT  Limits the amount of memory each ImageMagick instance is allowed to use (e.g., 1GiB) (default: unset).
