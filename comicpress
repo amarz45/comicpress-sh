@@ -310,7 +310,7 @@ run_magick_convert() {
         -density "${CONFIG[pixel_density]}" \
         "$input_file_with_ranges" \
         "${common_params[@]}" \
-        "${extra_params[@]}"
+        "${extra_params[@]}" \
         "$output_pattern" \
         2> /dev/null || true
 }
