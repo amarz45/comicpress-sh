@@ -63,6 +63,7 @@ MAGICK_TEMPORARY_PATH="${CONFIG[cache_home]}/magick"
 
 main() {
     parse_params "$@"
+    calculate_total_pages
     mkdir -p "${CONFIG[output_directory]}" "$CACHE_DIR" "$MAGICK_TEMPORARY_PATH"
 
     if command -v parallel > /dev/null; then
@@ -75,7 +76,7 @@ main() {
             create_cbz_archive get_magick_common_params run_magick_convert
 
         printf "%s\n" "${INPUT_FILES[@]}" \
-            | parallel -j "${CONFIG[num_threads]}" process_file
+            | parallel --ungroup -j "${CONFIG[num_threads]}" process_file
     else
         echo \
             "${CONFIG[prog_name]}" \
@@ -182,6 +183,30 @@ parse_params() {
         help
         die "No input files specified."
     fi
+}
+
+calculate_total_pages() {
+    local total_pages=0
+    local file_count
+    echo "Calculating total number of pages to process..." >&2
+
+    for file in "${INPUT_FILES[@]}"; do
+        if [[ "$file" == *.pdf ]]; then
+            file_count="$(pdfinfo "$file" | grep "^Pages:" | awk '{print $2}')"
+        elif [[ "$file" == *.cbz ]]; then
+            file_count="$(unzip -l "$file" | grep -vE '(^Archive:|^  Length|^-|^[0-9]+ file\(s\))' | wc -l)"
+        elif [[ "$file" == *.cbr ]]; then
+            if ! command -v unrar >/dev/null; then
+                die "unrar command not found, but is required to process CBR files."
+            fi
+            file_count="$(unrar l -inul "$file" | wc -l)"
+        else
+            file_count=0
+        fi
+        ((total_pages += file_count))
+    done
+
+    printf "TOTAL_PAGES:%d\n" "$total_pages"
 }
 
 help() {
@@ -365,6 +390,7 @@ process_pdf() {
             "${pdf_file_name}[$page_num_0_indexed]" \
             "$temp_dir/$(printf "%0*d" "$num_pages_digits" "$page_num").webp" \
             $?
+        printf "PROCESSED_PAGE:1\n"
     done
 
     create_cbz_archive "$pdf_base_name" "$temp_dir"
@@ -419,6 +445,7 @@ process_archive() {
             echo "$filename" | rev | cut -d . -f 2- | cut -d / -f 1 | rev
         )"
         run_magick_convert "$filename" "$images_renamed_dir/$img_base_name.webp" 1
+        printf "PROCESSED_PAGE:1\n"
     done
 
     create_cbz_archive "$base_name" "$images_renamed_dir"

@@ -2,6 +2,8 @@
 
 An advanced command-line tool to intelligently convert and optimize digital comics and manga into high-quality, space-saving CBZ archives.
 
+![Screenshot](screenshot.png)
+
 ## The Problem
 
 Digital comic book files are often unnecessarily large and not optimized for ereaders. Furthermore, they’re typically optimized for standard LCD screens instead of ereader screens. This can cause comics and manga to look washed out on ereaders. Comicpress is not just a tool to save space, it also makes comics and manga look _significantly_ better. Many existing conversion tools, such as [KCC](https://github.com/ciromattia/kcc), do save space, but often at the cost of quality. KCC does apply gamma correction by default to make most pages look better. However, this effect is indiscriminate, causing some pages to look worse. Comicpress applies smart post-processing, making comics and manga faithfully represent the print version. In short, comicpress gives you the best of all three worlds: _maximum space savings_, _indistinguishable visual fidelity loss_, and _better colouring_.
@@ -26,6 +28,7 @@ Digital comic book files are often unnecessarily large and not optimized for ere
 ### Recommended
 
 - GNU Parallel: For a significant performance boost when processing multiple files. The script will work without it, but much more slowly.
+- unrar: For CBR file inputs
 
 ## Installation
 
@@ -36,19 +39,11 @@ Digital comic book files are often unnecessarily large and not optimized for ere
    cd comicpress
    ```
 
-2. Install the script to `/usr/local/bin`:
+2. Install:
 
    ```sh
-   sudo make
+   sudo make install
    ```
-
-### Custom install location
-
-To install to a different directory, set the `PREFIX` variable:
-
-```sh
-make PREFIX=$HOME/.local
-```
 
 ## Uninstallation
 
@@ -56,7 +51,9 @@ make PREFIX=$HOME/.local
 sudo make uninstall
 ```
 
-## Examples
+## Usage
+
+I recommend using the GUI. However, here are some command-line examples:
 
 1. Using a device profile: The easiest way to run the script. It automatically configures the resolution and density for your device.
 

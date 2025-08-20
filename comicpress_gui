@@ -1,0 +1,478 @@
+#!/usr/bin/env python3
+
+import sys
+import subprocess
+import os
+import shutil
+import time
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QFormLayout, QLabel, QLineEdit, QPushButton, QComboBox, QSpinBox,
+    QFileDialog, QListWidget, QTextEdit, QMessageBox, QListWidgetItem,
+    QCheckBox, QDoubleSpinBox, QProgressBar
+)
+from PyQt6.QtCore import QThread, QObject, pyqtSignal, Qt
+
+DEVICES = {
+    "Custom": [],
+    # Kindle
+    "Kindle (11th Gen, 2022)": [300, 1072, 1448],
+    "Kindle Paperwhite (11th Gen)": [300, 1236, 1648],
+    "Kindle Paperwhite Signature Edition": [300, 1236, 1648],
+    "Kindle Oasis (3rd Gen)": [300, 1264, 1680],
+    "Kindle Scribe": [300, 1860, 2480],
+    # Kobo
+    "Kobo Clara BW": [300, 1072, 1448],
+    "Kobo Clara Colour": [300, 1072, 1448],
+    "Kobo Libra Colour": [300, 1264, 1680],
+    "Kobo Sage": [300, 1440, 1920],
+    "Kobo Elipsa 2E": [227, 1404, 1872],
+    # PocketBook
+    "PocketBook Verse": [212, 758, 1024],
+    "PocketBook Verse Pro": [300, 1072, 1448],
+    "PocketBook InkPad 4": [300, 1404, 1872],
+    "PocketBook InkPad Color 3": [300, 1404, 1872],
+    "PocketBook Era": [300, 1264, 1680],
+    # Boox
+    "Boox Palma": [300, 824, 1648],
+    "Boox Page": [300, 1264, 1680],
+    "Boox Note Air3 C": [300, 1404, 1872],
+    "Boox Tab Ultra C Pro": [300, 1860, 2480],
+    "Boox Tab X": [207, 1600, 2560],
+    # reMarkable
+    "reMarkable 2": [226, 1872, 1404]
+}
+
+class Worker(QObject):
+    """
+    Runs the comicpress script in a separate thread to avoid freezing the GUI.
+    """
+    progress = pyqtSignal(str)
+    total_pages_found = pyqtSignal(int)
+    page_processed = pyqtSignal()
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.process = None
+        self.command = None
+        self.was_cancelled = False
+
+    def set_command(self, command):
+        self.command = command
+
+    def run(self):
+        if not self.command:
+            self.error.emit("No command was set for the worker.")
+            self.finished.emit()
+            return
+
+        try:
+            self.process = subprocess.Popen(
+                self.command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            for line in iter(self.process.stdout.readline, ''):
+                clean_line = line.strip()
+                if clean_line.startswith("TOTAL_PAGES:"):
+                    try:
+                        total = int(clean_line.split(":")[1])
+                        self.total_pages_found.emit(total)
+                    except (ValueError, IndexError):
+                        self.progress.emit(f"Warning: Could not parse total pages from: {clean_line}")
+                elif clean_line == "PROCESSED_PAGE:1":
+                    self.page_processed.emit()
+                else:
+                    self.progress.emit(clean_line)
+
+            self.process.stdout.close()
+            self.process.wait()
+
+            if self.was_cancelled:
+                self.progress.emit("\n🛑 Process was cancelled by the user.")
+
+        except FileNotFoundError:
+            self.error.emit(f"Error: The script '{self.command[0]}' was not found.")
+        except Exception as e:
+            self.error.emit(f"An unexpected error occurred: {e}")
+        finally:
+            self.finished.emit()
+
+    def cancel(self):
+        if self.process:
+            self.was_cancelled = True
+            self.progress.emit("\n--- Sending cancellation signal to process ---")
+            self.process.terminate()
+
+class ComicPressGUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.worker = None
+        self.thread = None
+        self.total_pages = 0
+        self.processed_pages = 0
+        self.setWindowTitle("ComicPress GUI")
+        self.setGeometry(100, 100, 800, 650)
+        self.start_time = None
+
+        if not self.check_dependencies():
+            sys.exit(1)
+
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
+
+        self.setup_ui()
+        self.connect_signals()
+        self.on_device_changed()
+
+    def check_dependencies(self):
+        comicpress_path = shutil.which("comicpress")
+        if not comicpress_path and not os.path.exists("./comicpress"):
+            QMessageBox.critical(self, "Error", "The 'comicpress' script was not found in your PATH or the current directory.")
+            return False
+        if not shutil.which("magick"):
+            QMessageBox.critical(self, "Error", "ImageMagick's 'magick' command was not found in your PATH.")
+            return False
+        return True
+
+    def setup_ui(self):
+        io_group = QGroupBox("Input and Output")
+        io_layout = QVBoxLayout(io_group)
+        self.file_list = QListWidget()
+        self.file_list.setAlternatingRowColors(True)
+        file_buttons_layout = QHBoxLayout()
+        self.add_files_button = QPushButton("Add Files")
+        self.remove_file_button = QPushButton("Remove Selected")
+        self.clear_files_button = QPushButton("Clear All")
+        file_buttons_layout.addWidget(self.add_files_button)
+        file_buttons_layout.addWidget(self.remove_file_button)
+        file_buttons_layout.addWidget(self.clear_files_button)
+        io_layout.addWidget(QLabel("Input Files:"))
+        io_layout.addWidget(self.file_list)
+        io_layout.addLayout(file_buttons_layout)
+        output_layout = QHBoxLayout()
+        self.output_dir_edit = QLineEdit(os.getcwd())
+        self.output_dir_edit.setReadOnly(True)
+        self.browse_output_button = QPushButton("Browse...")
+        output_layout.addWidget(QLabel("Output Directory:"))
+        output_layout.addWidget(self.output_dir_edit)
+        output_layout.addWidget(self.browse_output_button)
+        io_layout.addLayout(output_layout)
+        self.main_layout.addWidget(io_group)
+
+        settings_group = QGroupBox("Processing Settings")
+        settings_layout = QFormLayout(settings_group)
+        self.device_combo = QComboBox()
+        self.device_combo.addItems(DEVICES.keys())
+        settings_layout.addRow("Device Preset:", self.device_combo)
+        self.density_spin = QSpinBox()
+        self.density_spin.setRange(50, 600)
+        self.density_spin.setValue(300)
+        settings_layout.addRow("Pixel Density (PPI):", self.density_spin)
+
+        scaling_widget = QWidget()
+        scaling_layout = QHBoxLayout(scaling_widget)
+        scaling_layout.setContentsMargins(0, 0, 0, 0)
+        self.enable_scaling_check = QCheckBox("Enable Image Scaling")
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(100, 4000)
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(100, 4000)
+        scaling_layout.addWidget(self.enable_scaling_check)
+        scaling_layout.addWidget(QLabel("Width:"))
+        scaling_layout.addWidget(self.width_spin)
+        scaling_layout.addWidget(QLabel("Height:"))
+        scaling_layout.addWidget(self.height_spin)
+        settings_layout.addRow(scaling_widget)
+
+        filter_widget = QWidget()
+        filter_layout = QHBoxLayout(filter_widget)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        self.enable_filter_check = QCheckBox("Enable Scaling Filter")
+        self.filter_combo = QComboBox()
+        self.populate_filters()
+        filter_layout.addWidget(self.enable_filter_check)
+        filter_layout.addWidget(self.filter_combo)
+        settings_layout.addRow(filter_widget)
+
+        self.jobs_spin = QSpinBox()
+        self.jobs_spin.setRange(1, os.cpu_count() * 2)
+        self.jobs_spin.setValue(os.cpu_count())
+        settings_layout.addRow("Number of Jobs:", self.jobs_spin)
+
+        mem_widget = QWidget()
+        mem_layout = QHBoxLayout(mem_widget)
+        mem_layout.setContentsMargins(0, 0, 0, 0)
+        self.enable_mem_limit_check = QCheckBox("Set Memory Limit")
+        self.mem_limit_value_spin = QDoubleSpinBox()
+        self.mem_limit_value_spin.setRange(1, 1024)
+        self.mem_limit_value_spin.setValue(1)
+        self.mem_limit_unit_combo = QComboBox()
+        self.mem_limit_unit_combo.addItems(["MiB", "GiB", "KiB", "TiB"])
+        mem_layout.addWidget(self.enable_mem_limit_check)
+        mem_layout.addWidget(self.mem_limit_value_spin)
+        mem_layout.addWidget(self.mem_limit_unit_combo)
+        settings_layout.addRow(mem_widget)
+        self.main_layout.addWidget(settings_group)
+
+        log_group = QGroupBox("Process Output")
+        log_layout = QVBoxLayout(log_group)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        log_layout.addWidget(self.progress_bar)
+
+        self.log_output = QTextEdit()
+        self.log_output.setReadOnly(True)
+        self.log_output.setFontFamily("monospace")
+        log_layout.addWidget(self.log_output)
+
+        action_layout = QHBoxLayout()
+        self.start_button = QPushButton("Start Conversion")
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setEnabled(False)
+        action_layout.addWidget(self.start_button)
+        action_layout.addWidget(self.cancel_button)
+        log_layout.addLayout(action_layout)
+        self.main_layout.addWidget(log_group)
+
+    def connect_signals(self):
+        self.add_files_button.clicked.connect(self.add_files)
+        self.remove_file_button.clicked.connect(self.remove_file)
+        self.clear_files_button.clicked.connect(self.file_list.clear)
+        self.browse_output_button.clicked.connect(self.browse_output_dir)
+        self.device_combo.currentTextChanged.connect(self.on_device_changed)
+        self.start_button.clicked.connect(self.start_conversion)
+        self.cancel_button.clicked.connect(self.cancel_conversion)
+        self.enable_scaling_check.stateChanged.connect(self.toggle_scaling_inputs)
+        self.enable_filter_check.stateChanged.connect(self.toggle_filter_inputs)
+        self.enable_mem_limit_check.stateChanged.connect(self.toggle_mem_limit_inputs)
+
+    def populate_filters(self):
+        try:
+            result = subprocess.run(
+                ["magick", "-list", "filter"],
+                capture_output=True, text=True, check=True
+            )
+            filters = [line.strip() for line in result.stdout.splitlines() if line.strip() and not line.startswith("Filter")]
+            self.filter_combo.addItems(filters)
+            if "MagicKernelSharp2021" in filters:
+                self.filter_combo.setCurrentText("MagicKernelSharp2021")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            QMessageBox.warning(self, "Warning", f"Could not get ImageMagick filters: {e}")
+            self.filter_combo.addItem("MagicKernelSharp2021")
+
+    def on_device_changed(self):
+        device_name = self.device_combo.currentText()
+        if device_name == "Custom":
+            self.density_spin.setEnabled(True)
+            self.enable_scaling_check.setEnabled(True)
+            self.enable_scaling_check.setChecked(False)
+        else:
+            specs = DEVICES[device_name]
+            self.density_spin.setValue(specs[0])
+            self.width_spin.setValue(specs[1])
+            self.height_spin.setValue(specs[2])
+            self.density_spin.setEnabled(False)
+            self.enable_scaling_check.setChecked(True)
+            self.enable_scaling_check.setEnabled(False)
+
+        self.toggle_scaling_inputs()
+        self.toggle_mem_limit_inputs()
+
+    def toggle_scaling_inputs(self):
+        is_custom = self.device_combo.currentText() == "Custom"
+        is_checked = self.enable_scaling_check.isChecked()
+        self.width_spin.setEnabled(is_custom and is_checked)
+        self.height_spin.setEnabled(is_custom and is_checked)
+        if not is_custom:
+            self.width_spin.setEnabled(False)
+            self.height_spin.setEnabled(False)
+
+        self.enable_filter_check.setEnabled(is_checked)
+        if not is_checked:
+            self.enable_filter_check.setChecked(False)
+            self.filter_combo.setEnabled(False)
+        elif not self.enable_filter_check.isChecked():
+            self.enable_filter_check.setChecked(True)
+
+    def toggle_filter_inputs(self):
+        is_enabled = self.enable_filter_check.isChecked()
+        self.filter_combo.setEnabled(is_enabled)
+
+    def toggle_mem_limit_inputs(self):
+        is_enabled = self.enable_mem_limit_check.isChecked()
+        self.mem_limit_value_spin.setEnabled(is_enabled)
+        self.mem_limit_unit_combo.setEnabled(is_enabled)
+
+    def add_files(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Comic Files",
+            "",
+            "Comic Files (*.pdf *.cbz *.cbr);;All Files (*)"
+        )
+        if not files:
+            return
+
+        existing_paths = [
+            self.file_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.file_list.count())
+        ]
+
+        all_paths = existing_paths + files
+        basenames = [os.path.basename(p) for p in all_paths]
+
+        for file_path in files:
+            if file_path in existing_paths:
+                continue
+            item = QListWidgetItem(os.path.basename(file_path))
+            item.setData(Qt.ItemDataRole.UserRole, file_path)
+            self.file_list.addItem(item)
+
+        for i in range(self.file_list.count()):
+            item = self.file_list.item(i)
+            path = item.data(Qt.ItemDataRole.UserRole)
+            base = os.path.basename(path)
+            if basenames.count(base) > 1:
+                item.setText(path)
+
+    def remove_file(self):
+        for item in self.file_list.selectedItems():
+            self.file_list.takeItem(self.file_list.row(item))
+
+    def browse_output_dir(self):
+        if directory := QFileDialog.getExistingDirectory(self, "Select Output Directory"):
+            self.output_dir_edit.setText(directory)
+
+    def start_conversion(self):
+        if self.file_list.count() == 0:
+            QMessageBox.warning(self, "Input Required", "Please add at least one input file.")
+            return
+
+        script_path = shutil.which("comicpress") or "./comicpress"
+        command = [script_path, "-d", self.output_dir_edit.text()]
+
+        if self.device_combo.currentText() != "Custom":
+            command.extend(["-device", self.device_combo.currentText()])
+        else:
+            command.extend(["-density", str(self.density_spin.value())])
+            if self.enable_scaling_check.isChecked():
+                command.extend(["-w", str(self.width_spin.value())])
+                command.extend(["-h", str(self.height_spin.value())])
+
+        if self.enable_filter_check.isChecked():
+            command.extend(["-f", self.filter_combo.currentText()])
+
+        command.extend(["-j", str(self.jobs_spin.value())])
+
+        if self.enable_mem_limit_check.isChecked():
+            mem_value = self.mem_limit_value_spin.value()
+            mem_unit = self.mem_limit_unit_combo.currentText()
+            command.extend(["-magick_memory_limit", f"{mem_value}{mem_unit}"])
+
+        command.extend([
+            self.file_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.file_list.count())
+        ])
+
+        self.log_output.clear()
+        self.log_output.append(f"▶️ Starting command: {' '.join(command)}\n")
+
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("Waiting for process to start...")
+        self.total_pages = 0
+        self.processed_pages = 0
+
+        self.start_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+
+        self.thread = QThread()
+        self.worker = Worker()
+        self.worker.set_command(command)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.progress.connect(self.log_output.append)
+        self.worker.error.connect(lambda err: self.log_output.append(f"\n❌ ERROR: {err}"))
+        self.worker.finished.connect(self.on_conversion_finished)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.worker.total_pages_found.connect(self.set_total_pages)
+        self.worker.page_processed.connect(self.increment_progress)
+        self.start_time = time.time()
+        self.thread.start()
+
+    def cancel_conversion(self):
+        if self.worker:
+            self.worker.cancel()
+            self.cancel_button.setEnabled(False)
+
+    def on_conversion_finished(self):
+        if self.worker and not self.worker.was_cancelled:
+             self.log_output.append("\n✅ Conversion process finished.")
+             self.progress_bar.setFormat("Complete!")
+        elif self.worker and self.worker.was_cancelled:
+             self.progress_bar.setFormat("Cancelled")
+
+        if self.thread:
+            self.thread.quit()
+            self.thread.wait()
+
+        self.start_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)
+        self.worker = None
+        self.thread = None
+
+    def set_total_pages(self, total):
+        """Slot to receive the total number of pages and configure the progress bar."""
+        self.total_pages = total
+        self.processed_pages = 0
+        self.progress_bar.setMaximum(total)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat(f"0% | 0 / {total} Pages")
+
+    def increment_progress(self):
+        """Slot to increment the progress bar for each page processed."""
+        if self.total_pages <= 0:
+            return
+
+        self.processed_pages += 1
+        self.progress_bar.setValue(self.processed_pages)
+
+        percent = (self.processed_pages / self.total_pages) * 100
+
+        elapsed = time.time() - self.start_time
+        avg_time = elapsed / self.processed_pages if self.processed_pages > 0 else 0
+        remaining = self.total_pages - self.processed_pages
+        eta_seconds = int(avg_time * remaining)
+        gm_time = time.gmtime(eta_seconds)
+
+        if eta_seconds < 60:
+            eta_str = time.strftime("%S s", gm_time)
+        elif eta_seconds < 3600:
+            eta_str = time.strftime("%M min %S s", gm_time)
+        else:
+            eta_str = time.strftime("%H h %M min %S s", gm_time)
+
+        self.progress_bar.setFormat(
+            f"{percent:.1f}% | {self.processed_pages} / {self.total_pages} Pages | ETA: {eta_str}"
+        )
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+
+    font = app.font()
+    font.setPointSize(16)
+    app.setFont(font)
+
+    window = ComicPressGUI()
+    window.show()
+    sys.exit(app.exec())
