@@ -2,7 +2,7 @@
 
 An advanced command-line tool to intelligently convert and optimize digital comics and manga into high-quality, space-saving CBZ archives.
 
-![Screenshot](screenshot.png)
+<img src="screenshot.png" alt="Screenshot" width="50%">
 
 ## The Problem
 
