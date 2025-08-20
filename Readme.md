@@ -4,14 +4,15 @@ An advanced command-line tool to intelligently convert and optimize digital comi
 
 ## The Problem
 
-Digital comic book files, especially PDFs, are often unnecessarily large and not optimized for ereaders or tablets. Many existing conversion applications can save space, but often at the cost of quality. Comic press gives you the best of both worlds: **maximum space savings with indistinguishable quality loss**.
+Digital comic book files are often unnecessarily large and not optimized for ereaders. Furthermore, they’re typically optimized for standard LCD screens instead of ereader screens. This can cause comics and manga to look washed out on ereaders. Comicpress is not just a tool to save space, it also makes comics and manga look _significantly_ better. Many existing conversion tools, such as [KCC](https://github.com/ciromattia/kcc), do save space, but often at the cost of quality. KCC does apply gamma correction by default to make most pages look better. However, this effect is indiscriminate, causing some pages to look worse. Comicpress applies smart post-processing, making comics and manga faithfully represent the print version. In short, comicpress gives you the best of all three worlds: _maximum space savings_, _indistinguishable visual fidelity loss_, and _better colouring_.
 
 ## Features
 
-- Device profiles: Easily target specific ereader devices to automatically use the correct resolution and density.
-- Intelligent page analysis: Automatically detects which pages are monochrome (stencil-only) and which contain colour or grayscale images.
-- Adaptive optimization: Applies aggressive (8-colour) compression to monochrome pages and quality-preserving (128-colour) compression to non-monochrome pages. This saves _a lot_ of space, and the quality loss is _indistinguishable_ (unless you zoom in very closely).
-- Parallel processing: Maximizes speed by converting multiple PDF files in parallel using all available CPU cores. If GNU Parallel is not installed, the script automatically reverts to a slower, sequential mode.
+- Supported input formats: PDF, CBZ, CBR
+- Device profiles: Easily target specific ereader devices to automatically use the correct resolution and pixel density.
+- Superior image quality: Uses a multi-stage ImageMagick process, including CLAHE (Contrast Limited Adaptive Histogram Equalization) and gamma correction, to make blacks darker and whites brighter, ensuring pages look crisp and vibrant on an e-ink display.
+- Intelligent compression: For PDF files, Comicpress analyzes each page to determine if it’s simple monochrome line art or if it contains color/grayscale. It then applies the best compression strategy for each, drastically reducing file size with visually indistinguishable quality loss.
+- Parallel processing: Maximizes speed by converting multiple files in parallel. (This can be configured.)
 
 # Dependencies
 
