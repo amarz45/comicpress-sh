@@ -294,11 +294,8 @@ create_cbz_archive() {
 get_magick_common_params() {
     local -n params_ref="$1"
 
-    if [[ "${CONFIG[magick_memory_limit]}" != unset ]]; then
-        params_ref+=(-limit memory "${CONFIG[magick_memory_limit]}")
-    fi
     params_ref+=(
-        -trim +repage -colorspace Gray -filter "${CONFIG[scaling_filter]}"
+        -colorspace Gray -filter "${CONFIG[scaling_filter]}"
     )
     if [[
         "${CONFIG[display_width]}" != unset \
@@ -383,27 +380,74 @@ process_pdf() {
 
     local num_pages_digits="$(echo -n "$num_pages" | wc -c | tr -d "[:space:]")"
 
-    local pages_non_monochrome="$(
+    local page_nums_non_monochrome="$(
         pdfimages -list "$pdf_file_name" \
-        | tail -n +3 \
-        | awk '$3 != "stencil" {print $1}' \
-        | sort -un
+            | tail -n +3 \
+            | awk '$3 != "stencil" {print $1}' \
+            | sort -un
     )"
 
-    echo "Analyzing $num_pages pages..."
+    local pages_monochrome=""
+    local pages_non_monochrome=""
 
     for page_num in $(seq 1 "$num_pages"); do
-        local page_num_0_indexed=$((page_num - 1))
-        local thing
-        echo "$pages_non_monochrome" | grep -q "^$page_num$"
-        run_magick_convert \
-            "${pdf_file_name}[$page_num_0_indexed]" \
-            "$temp_dir/$(printf "%0*d" "$num_pages_digits" "$page_num").webp" \
-            $?
-        printf "PROCESSED_PAGE:1\n"
+        page_num_0_indexed=$(("$page_num" - 1))
+        if echo "$page_nums_non_monochrome" | grep -q "^$page_num$"; then
+            if [[ "$pages_non_monochrome" != "" ]]; then
+                pages_non_monochrome="$pages_non_monochrome,$page_num_0_indexed"
+            else
+                pages_non_monochrome="$page_num_0_indexed"
+            fi
+        else
+            if [[ "$pages_monochrome" != "" ]]; then
+                pages_monochrome="$pages_monochrome,$page_num_0_indexed"
+            else
+                pages_monochrome="$page_num_0_indexed"
+            fi
+        fi
     done
 
-    create_cbz_archive "$pdf_base_name" "$temp_dir"
+    local -a common_params
+    get_magick_common_params common_params
+
+    local pre_params=()
+
+    if [[ "${CONFIG[magick_memory_limit]}" != unset ]]; then
+        pre_params+=(-limit memory "${CONFIG[magick_memory_limit]}")
+    fi
+
+    pre_params+=(
+        -define pdf:use-cropbox=true -density "${CONFIG[pixel_density]}"
+    )
+    local output="$temp_dir/%0${num_pages_digits}d.webp"
+
+    magick \
+        "${pre_params[@]}" \
+        "$pdf_file_name[$pages_monochrome]" \
+        "${common_params[@]}" \
+        -define webp:lossless=true \
+        -colors 8 \
+        "$output" \
+        2> /dev/null || true
+
+    magick \
+        "${pre_params[@]}" \
+        "$pdf_file_name[$pages_non_monochrome]" \
+        "${common_params[@]}" \
+        "$output" \
+        2> /dev/null || true
+
+    local renamed_dir="$CACHE_DIR/$pdf_base_name (renamed)"
+    mkdir -p "$renamed_dir"
+
+    local i=1
+    for file_name in "$temp_dir"/*.webp; do
+        local base_name="$(printf "%0*d" "$num_pages_digits" "$i")"
+        mv "$file_name" "$renamed_dir/$base_name.webp"
+        ((i += 1))
+    done
+
+    create_cbz_archive "$pdf_base_name" "$renamed_dir"
 }
 
 process_archive() {
