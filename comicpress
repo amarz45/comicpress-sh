@@ -55,7 +55,9 @@ declare -A DEVICES=(
     ["reMarkable 2"]="226 1872 1404"
 )
 
-CACHE_DIR=$(mktemp -d "${CONFIG[cache_home]}/${CONFIG[prog_name]}/XXXXXX")
+CACHE_DIR="${CONFIG[cache_home]}/${CONFIG[prog_name]}"
+mkdir -p "$CACHE_DIR"
+CACHE_DIR=$(mktemp -d "$CACHE_DIR/XXXXXX")
 trap 'rm -rf "$CACHE_DIR"' EXIT
 
 TMPDIR="${CONFIG[cache_home]}/parallel"
@@ -73,7 +75,8 @@ main() {
         export CACHE_DIR TMPDIR MAGICK_TEMPORARY_PATH
         export -f \
             process_file process_pdf process_archive list_to_ranges die \
-            create_cbz_archive get_magick_common_params run_magick_convert
+            create_cbz_archive get_magick_common_params run_magick_convert \
+            run_magick_mogrify
 
         printf "%s\n" "${INPUT_FILES[@]}" \
             | parallel --ungroup -j "${CONFIG[num_threads]}" process_file
@@ -306,13 +309,7 @@ get_magick_common_params() {
             -resize "${CONFIG[display_width]}x${CONFIG[display_height]}"
         )
     fi
-    params_ref+=(
-        -clahe "25x25%+256+3" \
-        "(" +clone -level 0%,100%,0.5 ")" \
-        -compose Darken \
-        -composite \
-        -strip \
-    )
+    params_ref+=(-strip)
     if [[ "${CONFIG[image_quality]}" != unset ]]; then
         params_ref+=(-quality "${CONFIG[image_quality]}")
     fi
@@ -327,7 +324,7 @@ run_magick_convert() {
     get_magick_common_params common_params
 
     local -a extra_params=()
-    if [[ "$is_non_monochrome" -eq 1 ]]; then
+    if [[ "$is_non_monochrome" -eq 0 ]]; then
         extra_params=(-define webp:lossless=true -colors 8)
     fi
 
@@ -337,6 +334,19 @@ run_magick_convert() {
         "${common_params[@]}" \
         "${extra_params[@]}" \
         "$output_pattern" \
+        2> /dev/null || true
+}
+
+run_magick_mogrify() {
+    local image_dir="$1"
+
+    local -a common_params
+    get_magick_common_params common_params
+
+    magick mogrify \
+        "${common_params[@]}" \
+        -format webp \
+        "$image_dir"/* \
         2> /dev/null || true
 }
 
@@ -440,13 +450,14 @@ process_archive() {
         ((counter += 1))
     done < <(find "$temp_dir" -maxdepth 1 -type f | sort)
 
-    for filename in "$images_renamed_dir"/*; do
-        img_base_name="$(
-            echo "$filename" | rev | cut -d . -f 2- | cut -d / -f 1 | rev
-        )"
-        run_magick_convert "$filename" "$images_renamed_dir/$img_base_name.webp" 1
-        printf "PROCESSED_PAGE:1\n"
-    done
+    #for filename in "$images_renamed_dir"/*; do
+    #    img_base_name="$(
+    #        echo "$filename" | rev | cut -d . -f 2- | cut -d / -f 1 | rev
+    #    )"
+    #    run_magick_convert "$filename" "$images_renamed_dir/$img_base_name.webp" 1
+    #    printf "PROCESSED_PAGE:1\n"
+    #done
+    run_magick_mogrify "$images_renamed_dir"
 
     create_cbz_archive "$base_name" "$images_renamed_dir"
 }
