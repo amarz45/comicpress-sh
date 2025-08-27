@@ -1,3 +1,7 @@
+# Important!
+
+This project is now archived. Please see the new [Comicpress](https://github.com/amarz45/comicpress) instead.
+
 # Comicpress
 
 An advanced command-line tool to intelligently convert and optimize digital comics and manga into high-quality, space-saving CBZ archives.
